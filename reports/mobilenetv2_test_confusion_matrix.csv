@@ -1,0 +1,5 @@
+,cocci,healthy,ncd,salmo
+cocci,311,0,3,2
+healthy,0,291,9,8
+ncd,2,2,53,0
+salmo,1,3,5,332

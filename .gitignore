@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Node / frontend build
+frontend/node_modules/
+frontend/dist/
+
+# Environment and logs
+.env
+*.env
+logs/
+run_logs/
+*.log
+
+# Raw datasets and archives are too large for the GitHub repository.
+data/
+cocci/
+healthy/
+ncd/
+salmo/
+*.zip
+
+# Training experiment outputs.
+experiments/
+
+# Keep only the model artifacts required by the app.
+models/*
+!models/best_model.keras
+!models/feces_reference_stats.npz

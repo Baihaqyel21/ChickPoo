@@ -1,0 +1,10 @@
+              precision    recall  f1-score   support
+
+       cocci     0.9874    0.9905    0.9889       316
+     healthy     0.9503    0.9318    0.9410       308
+         ncd     0.7419    0.8070    0.7731        57
+       salmo     0.9472    0.9472    0.9472       341
+
+    accuracy                         0.9481      1022
+   macro avg     0.9067    0.9191    0.9126      1022
+weighted avg     0.9491    0.9481    0.9485      1022

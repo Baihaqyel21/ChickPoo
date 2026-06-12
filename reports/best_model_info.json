@@ -1,0 +1,14 @@
+{
+    "best_model_name": "efficientnetb0_frozen",
+    "selection_metric": "macro_f1",
+    "best_model_source": "/kaggle/working/poultrycare_outputs/models/efficientnetb0_frozen_final.keras",
+    "best_model_path": "/kaggle/working/poultrycare_outputs/models/best_model.keras",
+    "class_names": [
+        "cocci",
+        "healthy",
+        "ncd",
+        "salmo"
+    ],
+    "img_size": 224,
+    "created_at": "2026-05-25T16:16:27.773418"
+}
