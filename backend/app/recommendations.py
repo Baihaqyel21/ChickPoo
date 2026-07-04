@@ -6,10 +6,10 @@ CLASS_LABELS = {
 }
 
 CLASS_DESCRIPTIONS = {
-    "cocci": "Foto menunjukkan pola yang paling mirip dengan kelas coccidiosis pada dataset.",
-    "healthy": "Foto menunjukkan pola yang paling mirip dengan kelas feses ayam sehat pada dataset.",
-    "ncd": "Foto menunjukkan pola yang paling mirip dengan kelas Newcastle Disease pada dataset.",
-    "salmo": "Foto menunjukkan pola yang paling mirip dengan kelas Salmonella pada dataset.",
+    "cocci": "Pola feses mengarah ke dugaan coccidiosis.",
+    "healthy": "Pola feses tampak mendekati kondisi normal.",
+    "ncd": "Pola feses mengarah ke dugaan Newcastle Disease.",
+    "salmo": "Pola feses mengarah ke dugaan Salmonella.",
 }
 
 RECOMMENDATIONS = {
@@ -42,19 +42,19 @@ RECOMMENDATIONS = {
 UNCERTAIN_RECOMMENDATIONS = [
     "Ambil foto ulang dengan objek feses terlihat dekat dan memenuhi sebagian besar frame.",
     "Gunakan pencahayaan cukup, hindari bayangan keras, foto buram, atau flash yang memantul berlebihan.",
-    "Pastikan foto yang dimasukkan benar-benar foto feses ayam, bukan kandang, pakan, tanah, tangan, atau objek lain.",
-    "Bila ayam menunjukkan gejala sakit, tetap lakukan observasi dan konsultasi meskipun model belum yakin.",
+    "Pastikan foto yang dimasukkan benar-benar kotoran ayam, bukan kandang, pakan, tanah, tangan, atau objek lain.",
+    "Bila ayam menunjukkan gejala sakit, tetap lakukan observasi dan konsultasi meskipun hasil foto belum kuat.",
 ]
 
 INVALID_INPUT_RECOMMENDATIONS = [
-    "Ambil ulang foto dengan objek utama berupa kotoran atau feses ayam, bukan tangan, pakan, tubuh ayam, atau benda lain.",
-    "Dekatkan kamera sampai feses memenuhi sebagian besar frame agar sistem dapat membaca tekstur dan warna dengan lebih baik.",
+    "Ambil ulang foto dengan objek utama berupa kotoran ayam, bukan tangan, pakan, tubuh ayam, atau benda lain.",
+    "Dekatkan kamera sampai kotoran memenuhi sebagian besar frame agar warna dan teksturnya terlihat jelas.",
     "Gunakan pencahayaan cukup dan hindari latar putih polos yang membuat objek sulit dibedakan dari foto non-feses.",
     "Jika memang foto sudah berisi feses ayam, ulangi dari sudut yang lebih dekat dan pastikan fokus kamera terkunci pada objek.",
 ]
 
 DISCLAIMER = (
-    "ChickPoo adalah alat screening awal berbasis gambar, bukan diagnosis veteriner final. "
+    "ChickPoo adalah alat pemeriksaan awal berbasis gambar, bukan diagnosis veteriner final. "
     "Keputusan penanganan penyakit tetap perlu mempertimbangkan gejala klinis, kondisi kandang, "
     "dan konfirmasi petugas kesehatan hewan."
 )
@@ -64,25 +64,24 @@ def confidence_band(confidence: float) -> dict:
     if confidence >= 0.80:
         return {
             "level": "tinggi",
-            "message": "Model cukup yakin dengan prediksi utama.",
+            "message": "Tingkat keyakinan pada hasil utama cukup tinggi.",
         }
     if confidence >= 0.60:
         return {
             "level": "sedang",
-            "message": "Model memberi indikasi awal, tetapi foto sebaiknya tetap diperiksa ulang.",
+            "message": "Hasil dapat menjadi indikasi awal, tetapi foto dan kondisi ayam tetap perlu diperiksa ulang.",
         }
     return {
         "level": "rendah",
-        "message": "Model belum cukup yakin. Foto mungkin kurang jelas atau objek tidak sesuai.",
+        "message": "Tingkat keyakinan masih rendah. Foto mungkin kurang jelas atau objek belum terlihat baik.",
     }
 
 
-def build_recommendation(label: str, confidence: float, quality_flags: list[dict]) -> dict:
+def build_recommendation(label: str, confidence: float) -> dict:
     band = confidence_band(confidence)
-    quality_messages = [flag["message"] for flag in quality_flags]
 
     if confidence < 0.60:
-        headline = "Model belum yakin terhadap foto ini."
+        headline = "Hasil belum cukup kuat untuk dijadikan acuan."
         actions = UNCERTAIN_RECOMMENDATIONS
     else:
         headline = CLASS_DESCRIPTIONS[label]
@@ -93,17 +92,24 @@ def build_recommendation(label: str, confidence: float, quality_flags: list[dict
         "confidence_level": band["level"],
         "confidence_message": band["message"],
         "actions": actions,
-        "photo_notes": quality_messages,
+        "photo_notes": [],
         "disclaimer": DISCLAIMER,
     }
 
 
-def build_invalid_input_recommendation(quality_flags: list[dict], relevance_flags: list[dict]) -> dict:
-    notes = [flag["message"] for flag in relevance_flags] + [flag["message"] for flag in quality_flags]
+def build_invalid_input_recommendation(object_validation: dict) -> dict:
+    probability = object_validation.get("percentage_chicken_feces", 0)
+    threshold = object_validation.get("threshold", 0.69) * 100
+    notes = [
+        (
+            "Penyaring awal memberi skor kesesuaian "
+            f"{probability:.2f}%, sedangkan ambang lolos adalah {threshold:.0f}%."
+        )
+    ]
     return {
-        "headline": "Foto belum dikenali sebagai feses ayam.",
+        "headline": "Foto belum cukup sesuai untuk dibaca.",
         "confidence_level": "perlu foto ulang",
-        "confidence_message": "Sistem menahan prediksi penyakit karena objek foto terindikasi tidak sesuai.",
+        "confidence_message": "Pemeriksaan penyakit ditahan agar hasil tidak berasal dari objek yang salah.",
         "actions": INVALID_INPUT_RECOMMENDATIONS,
         "photo_notes": notes,
         "disclaimer": DISCLAIMER,

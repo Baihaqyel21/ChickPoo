@@ -1,0 +1,31 @@
+{
+    "project": "ChickPoo Object Validation Model",
+    "task": "binary image classification: chicken feces vs not chicken feces",
+    "created_at": "2026-07-04T10:36:08.489653",
+    "best_model_name": "efficientnetb0_finetuned",
+    "best_model_path": "/kaggle/working/chickpoo_object_validation_outputs/models/best_object_validation_model.keras",
+    "best_threshold": 0.69,
+    "image_size": 224,
+    "class_names": [
+        "not_chicken_feces",
+        "chicken_feces"
+    ],
+    "label_to_id": {
+        "not_chicken_feces": 0,
+        "chicken_feces": 1
+    },
+    "positive_class": "chicken_feces",
+    "negative_class": "not_chicken_feces",
+    "decision_rule": "Accept as chicken_feces if predicted probability >= best_threshold",
+    "test_metrics": {
+        "model": "efficientnetb0_finetuned",
+        "split": "test",
+        "threshold": 0.69,
+        "accuracy": 0.9954068241469817,
+        "auc": 0.9999727118921574,
+        "precision_chicken_feces": 0.9990167158308751,
+        "recall_chicken_feces": 0.9941291585127201,
+        "f1_chicken_feces": 0.9965669445806769,
+        "macro_f1": 0.9948146913190797
+    }
+}

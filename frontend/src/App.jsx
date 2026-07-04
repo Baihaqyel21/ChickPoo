@@ -1,24 +1,19 @@
 import {
-  Activity,
   AlertTriangle,
   ArrowRight,
   BarChart3,
   Camera,
   CheckCircle2,
   ChevronRight,
-  ClipboardList,
   FileText,
   Gauge,
   ImagePlus,
-  Leaf,
-  Lightbulb,
   LoaderCircle,
   RotateCcw,
   ScanSearch,
   ShieldAlert,
   ShieldCheck,
-  SlidersHorizontal,
-  Smartphone,
+  Sparkles,
   Upload,
   Wheat,
   X,
@@ -27,11 +22,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
-const sections = [
-  { id: 'scanner', label: 'Scanner', icon: ScanSearch },
-  { id: 'model', label: 'Model', icon: BarChart3 },
-  { id: 'guide', label: 'Panduan', icon: Lightbulb },
-  { id: 'about', label: 'Project', icon: FileText },
+const navItems = [
+  { id: 'home', label: 'Beranda' },
+  { id: 'scanner', label: 'Scanner' },
+  { id: 'workflow', label: 'Cara Kerja' },
+  { id: 'model', label: 'Model' },
 ];
 
 const sampleImages = [
@@ -41,25 +36,18 @@ const sampleImages = [
   { src: '/samples/salmo.jpg', label: 'Salmonella', filename: 'salmo-sample.jpg' },
 ];
 
-const metrics = [
-  { label: 'Accuracy', value: '98.34%', note: 'akurasi pada test set' },
-  { label: 'Macro F1', value: '96.91%', note: 'metrik utama untuk dataset tidak seimbang' },
-  { label: 'Recall NCD', value: '92.98%', note: 'kelas kritis tetap terbaca dengan baik' },
+const modelMetrics = [
+  { label: 'Validasi Objek', value: '99.54%', note: 'akurasi pada test set validasi objek' },
+  { label: 'Presisi Gate', value: '99.90%', note: 'ketepatan saat menerima feses ayam' },
+  { label: 'Accuracy', value: '98.34%', note: 'akurasi model klasifikasi penyakit' },
+  { label: 'Macro F1', value: '96.91%', note: 'metrik utama untuk kelas tidak seimbang' },
 ];
 
 const classInfo = [
-  { label: 'Sehat', key: 'healthy', text: 'Pola visual feses mendekati kondisi normal pada dataset.' },
-  { label: 'Coccidiosis', key: 'cocci', text: 'Indikasi visual yang perlu dipantau karena berisiko mengganggu produktivitas.' },
-  { label: 'Newcastle Disease', key: 'ncd', text: 'Kelas berisiko tinggi yang sebaiknya segera ditindaklanjuti.' },
-  { label: 'Salmonella', key: 'salmo', text: 'Indikasi visual yang berkaitan dengan potensi gangguan pencernaan.' },
-];
-
-const guideItems = [
-  'Dekatkan kamera sampai feses menjadi objek utama di dalam frame.',
-  'Gunakan pencahayaan yang cukup agar warna dan tekstur terbaca jelas.',
-  'Pastikan foto fokus, tidak buram, dan tidak terlalu gelap.',
-  'Kurangi objek pengganggu seperti tangan, pakan, alas kandang yang terlalu ramai, atau tubuh ayam.',
-  'Jika sistem meminta foto ulang, ambil gambar baru dari jarak dan cahaya yang lebih baik.',
+  { label: 'Sehat', key: 'healthy', tone: 'good', text: 'Pola visual mendekati kondisi normal.' },
+  { label: 'Coccidiosis', key: 'cocci', tone: 'warning', text: 'Perlu pemantauan karena dapat mengganggu produktivitas.' },
+  { label: 'Newcastle Disease', key: 'ncd', tone: 'danger', text: 'Kelas berisiko tinggi dan perlu tindak lanjut cepat.' },
+  { label: 'Salmonella', key: 'salmo', tone: 'warning', text: 'Berkaitan dengan potensi gangguan pencernaan dan sanitasi.' },
 ];
 
 const statusIcon = {
@@ -69,52 +57,45 @@ const statusIcon = {
   invalid_input: ShieldAlert,
 };
 
-const sectionCopy = {
-  scanner: {
-    kicker: 'ChickPoo Scanner',
-    title: 'Scanner kesehatan ayam',
-    text: 'Unggah foto feses, ChickPoo memvalidasi objek lalu menampilkan prediksi, confidence, dan rekomendasi tindakan.',
-  },
-  model: {
-    kicker: 'Model Terbaik',
-    title: 'EfficientNetB0 frozen untuk klasifikasi empat kondisi',
-    text: 'Model terbaik saat ini dipilih dari eksperimen training berdasarkan performa test set dan keseimbangan antar kelas.',
-  },
-  guide: {
-    kicker: 'Panduan Input',
-    title: 'Foto yang baik membuat hasil lebih dapat dipercaya',
-    text: 'ChickPoo membaca citra. Semakin jelas objek feses di foto, semakin baik dasar sistem untuk melakukan screening.',
-  },
-  about: {
-    kicker: 'Tentang Project',
-    title: 'Machine learning yang dekat dengan kebutuhan peternak',
-    text: 'ChickPoo dirancang sebagai alat screening awal yang mudah dijelaskan di kelas dan tetap mudah dipahami oleh peternak.',
-  },
-};
-
 function formatPercent(value) {
   return `${Number(value || 0).toFixed(2)}%`;
 }
 
+function objectValidationPercent(result) {
+  return result?.object_validation?.percentage_chicken_feces ?? 0;
+}
+
+function isLikelyFeces(result) {
+  return result?.object_validation?.status === 'likely_feces';
+}
+
+function photoSuitabilityPercent(result) {
+  if (isLikelyFeces(result)) {
+    return result?.object_validation?.visual_support?.support_score ?? objectValidationPercent(result);
+  }
+  return objectValidationPercent(result);
+}
+
+function resultTone(result) {
+  if (!result) return 'idle';
+  if (result.status === 'invalid_input') return 'danger';
+  if (result.predicted_class === 'healthy') return 'good';
+  if (result.predicted_class === 'ncd') return 'danger';
+  return 'warning';
+}
+
 function App() {
-  const [entered, setEntered] = useState(false);
-  const [activeSection, setActiveSection] = useState('scanner');
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState('');
+  const [dragActive, setDragActive] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
-  const [insightOpen, setInsightOpen] = useState(true);
+  const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-
-  const activeCopy = sectionCopy[activeSection];
-  const StatusIcon = useMemo(() => {
-    if (!result) return ScanSearch;
-    return statusIcon[result.status] || AlertTriangle;
-  }, [result]);
 
   useEffect(() => {
     return () => {
@@ -132,40 +113,51 @@ function App() {
     if (!cameraActive || !videoRef.current || !streamRef.current) return;
     videoRef.current.srcObject = streamRef.current;
     videoRef.current.play().catch(() => {
-      setCameraError('Kamera belum bisa memutar preview. Coba tutup lalu buka lagi.');
+      setCameraError('Kamera belum bisa menampilkan preview. Tutup lalu buka lagi.');
     });
   }, [cameraActive]);
 
-  function enterApp() {
-    setEntered(true);
-    window.setTimeout(() => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 0);
-  }
-
-  function changeSection(sectionId) {
-    setActiveSection(sectionId);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  function scrollToSection(sectionId) {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function updateSelectedFile(file) {
+    if (!file) return;
     setError('');
     setResult(null);
     setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    setPreviewUrl((previousUrl) => {
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      return URL.createObjectURL(file);
+    });
   }
 
   function handleFileInput(event) {
-    const file = event.target.files?.[0];
-    if (file) updateSelectedFile(file);
+    updateSelectedFile(event.target.files?.[0]);
     event.target.value = '';
+  }
+
+  function handleDrop(event) {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file?.type?.startsWith('image/')) {
+      updateSelectedFile(file);
+    } else {
+      setError('Gunakan file gambar seperti JPG, PNG, atau WEBP.');
+    }
+  }
+
+  function handleDrag(event, active) {
+    event.preventDefault();
+    setDragActive(active);
   }
 
   async function useSampleImage(item) {
     const response = await fetch(item.src);
     const blob = await response.blob();
     updateSelectedFile(new File([blob], item.filename, { type: blob.type || 'image/jpeg' }));
-    changeSection('scanner');
+    scrollToSection('scanner');
   }
 
   async function startCamera() {
@@ -178,6 +170,7 @@ function App() {
       });
       streamRef.current = stream;
       setCameraActive(true);
+      scrollToSection('scanner');
     } catch {
       setCameraError('Kamera tidak bisa diakses. Periksa izin kamera di browser.');
     }
@@ -204,8 +197,7 @@ function App() {
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob((blob) => {
       if (!blob) return;
-      const file = new File([blob], `chickpoo-camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      updateSelectedFile(file);
+      updateSelectedFile(new File([blob], `chickpoo-camera-${Date.now()}.jpg`, { type: 'image/jpeg' }));
       stopCamera();
     }, 'image/jpeg', 0.92);
   }
@@ -229,11 +221,11 @@ function App() {
       });
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.detail || 'Prediksi gagal diproses.');
+        throw new Error(payload.detail || 'Analisis belum bisa diproses.');
       }
       setResult(payload);
     } catch (requestError) {
-      setError(requestError.message || 'Backend belum siap atau tidak bisa dihubungi.');
+      setError(requestError.message || 'Layanan belum siap. Coba beberapa saat lagi.');
     } finally {
       setIsLoading(false);
     }
@@ -243,131 +235,140 @@ function App() {
     setSelectedFile(null);
     setResult(null);
     setError('');
-    setPreviewUrl('');
-  }
-
-  if (!entered) {
-    return <LandingGate onEnter={enterApp} />;
+    setCameraError('');
+    setPreviewUrl((previousUrl) => {
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      return '';
+    });
   }
 
   return (
-    <main className={`app-shell ${insightOpen ? 'insight-open' : 'insight-closed'}`}>
-      <header className="app-topbar">
-        <div className="topbar-inner">
-          <button className="brand-lockup" type="button" onClick={() => changeSection('scanner')} title="Ke scanner">
-            <span className="brand-mark" aria-hidden="true">
-              <Leaf size={24} />
-            </span>
-            <span className="brand-copy">
-              <strong>ChickPoo</strong>
-              <small>AI screening feses ayam</small>
-            </span>
+    <main className="app-shell">
+      <AmbientBackground />
+      <TopNav onNavigate={scrollToSection} />
+      <HeroSection onStart={() => scrollToSection('scanner')} onLearn={() => scrollToSection('workflow')} />
+      <ScannerSection
+        selectedFile={selectedFile}
+        previewUrl={previewUrl}
+        cameraActive={cameraActive}
+        cameraError={cameraError}
+        dragActive={dragActive}
+        isLoading={isLoading}
+        result={result}
+        error={error}
+        fileInputRef={fileInputRef}
+        videoRef={videoRef}
+        handleFileInput={handleFileInput}
+        handleDrop={handleDrop}
+        handleDrag={handleDrag}
+        startCamera={startCamera}
+        stopCamera={stopCamera}
+        capturePhoto={capturePhoto}
+        submitPrediction={submitPrediction}
+        resetInput={resetInput}
+        useSampleImage={useSampleImage}
+      />
+      <WorkflowSection onStart={() => scrollToSection('scanner')} />
+      <ModelSection onStart={() => scrollToSection('scanner')} />
+      <AboutSection onStart={() => scrollToSection('scanner')} />
+    </main>
+  );
+}
+
+function AmbientBackground() {
+  return <div className="ambient" aria-hidden="true" />;
+}
+
+function TopNav({ onNavigate }) {
+  return (
+    <header className="topbar">
+      <button className="brand" type="button" onClick={() => onNavigate('home')} title="Kembali ke beranda">
+        <span className="brand-mark">
+          <img src="/assets/poop.png" alt="" />
+        </span>
+        <span>
+          <strong>ChickPoo</strong>
+          <small>Pemeriksaan awal</small>
+        </span>
+      </button>
+      <nav className="nav-links" aria-label="Navigasi utama">
+        {navItems.map((item) => (
+          <button key={item.id} type="button" onClick={() => onNavigate(item.id)}>
+            {item.label}
           </button>
+        ))}
+      </nav>
+      <button className="nav-cta" type="button" onClick={() => onNavigate('scanner')}>
+        <ScanSearch size={18} />
+        <span>Mulai Scan</span>
+      </button>
+    </header>
+  );
+}
 
-          <nav className="top-nav" aria-label="Navigasi utama">
-            {sections.map((section) => {
-              const Icon = section.icon;
-              return (
-                <button
-                  className={activeSection === section.id ? 'active' : ''}
-                  type="button"
-                  key={section.id}
-                  onClick={() => changeSection(section.id)}
-                >
-                  <Icon size={18} />
-                  <span>{section.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          <button className="insight-toggle" type="button" onClick={() => setInsightOpen((value) => !value)}>
-            <SlidersHorizontal size={18} />
-            <span>{insightOpen ? 'Tutup panel' : 'Buka panel'}</span>
+function HeroSection({ onStart, onLearn }) {
+  return (
+    <section className="hero-section" id="home">
+      <div className="hero-copy">
+        <p className="eyebrow">Peternakan modern, keputusan lebih cepat</p>
+        <h1>Screening Kesehatan Ayam dari Foto Feses</h1>
+        <p>
+          ChickPoo membantu peternak membaca sinyal awal kesehatan ayam dari foto feses,
+          lalu menyajikan peluang kondisi dan rekomendasi tindakan dengan bahasa yang mudah dipahami.
+        </p>
+        <div className="hero-actions">
+          <button className="primary-action" type="button" onClick={onStart}>
+            <ScanSearch size={20} />
+            <span>Mulai Scan</span>
+          </button>
+          <button className="secondary-action" type="button" onClick={onLearn}>
+            <span>Lihat Cara Kerja</span>
+            <ArrowRight size={18} />
           </button>
         </div>
-      </header>
-
-      <div className="main-stage">
-        <section className="app-header">
-          <div className="header-copy">
-            <p className="eyebrow">{activeCopy.kicker}</p>
-            <h1>{activeCopy.title}</h1>
-            <p>{activeCopy.text}</p>
-          </div>
-          <div className="header-signal">
-            <span>
-              <ShieldCheck size={18} />
-              Validity gate aktif
-            </span>
-            <strong>Quality + visual + embedding</strong>
-            <small>Menahan input non-feses sebelum prediksi penyakit ditampilkan.</small>
-          </div>
-        </section>
-
-        {activeSection === 'scanner' && (
-          <ScannerView
-            insightOpen={insightOpen}
-            selectedFile={selectedFile}
-            previewUrl={previewUrl}
-            cameraActive={cameraActive}
-            cameraError={cameraError}
-            isLoading={isLoading}
-            result={result}
-            error={error}
-            videoRef={videoRef}
-            StatusIcon={StatusIcon}
-            handleFileInput={handleFileInput}
-            startCamera={startCamera}
-            stopCamera={stopCamera}
-            capturePhoto={capturePhoto}
-            submitPrediction={submitPrediction}
-            resetInput={resetInput}
-            useSampleImage={useSampleImage}
-          />
-        )}
-        {activeSection === 'model' && <ModelView changeSection={changeSection} />}
-        {activeSection === 'guide' && <GuideView changeSection={changeSection} />}
-        {activeSection === 'about' && <AboutView changeSection={changeSection} />}
+        <div className="hero-proof" aria-label="Ringkasan alur ChickPoo">
+          <span>Upload foto</span>
+          <span>Screening objek</span>
+          <span>Rekomendasi tindakan</span>
+        </div>
       </div>
-    </main>
+
+      <aside className="hero-visual" aria-label="Visual peternakan ChickPoo">
+        <div className="farm-card">
+          <img src="/assets/background-landingpage.jpg" alt="Peternakan ayam modern" />
+          <div className="farm-card-glow" aria-hidden="true" />
+          <div className="farm-caption">
+            <span>ChickPoo</span>
+            <strong>Dari kandang, keputusan awal lebih cepat.</strong>
+          </div>
+        </div>
+        <div className="floating-card floating-card-top">
+          <ShieldCheck size={18} />
+          <span>Foto dicek lebih dulu sebelum hasil penyakit tampil.</span>
+        </div>
+        <div className="floating-card floating-card-bottom">
+          <Sparkles size={18} />
+          <span>Hasil dibuat ringkas, transparan, dan mudah dijelaskan.</span>
+        </div>
+      </aside>
+    </section>
   );
 }
 
-function LandingGate({ onEnter }) {
-  return (
-    <main className="landing-gate">
-      <div className="landing-shade" />
-      <section className="landing-copy" aria-label="Pembuka ChickPoo">
-        <p className="landing-kicker">AI screening untuk peternakan ayam modern</p>
-        <h1>ChickPoo</h1>
-        <p>
-          Prediksi awal penyakit ayam dari foto feses, tampilkan tingkat keyakinan model, lalu
-          berikan rekomendasi tindakan yang jelas untuk langkah berikutnya.
-        </p>
-        <button className="landing-cta" type="button" onClick={onEnter}>
-          <ScanSearch size={22} />
-          <span>Mulai Deteksi</span>
-          <ArrowRight size={20} />
-        </button>
-        <small>Dirancang untuk pembelajaran machine learning dan screening awal di lapangan.</small>
-      </section>
-    </main>
-  );
-}
-
-function ScannerView({
-  insightOpen,
+function ScannerSection({
   selectedFile,
   previewUrl,
   cameraActive,
   cameraError,
+  dragActive,
   isLoading,
   result,
   error,
+  fileInputRef,
   videoRef,
-  StatusIcon,
   handleFileInput,
+  handleDrop,
+  handleDrag,
   startCamera,
   stopCamera,
   capturePhoto,
@@ -376,147 +377,248 @@ function ScannerView({
   useSampleImage,
 }) {
   return (
-    <section className={`scanner-view page-motion ${insightOpen ? '' : 'insight-closed'}`}>
-      <div className="scanner-console">
-        <section className="capture-panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Input Gambar</p>
-              <h2>Ambil foto feses ayam</h2>
-            </div>
-            {selectedFile && (
-              <button className="icon-button" type="button" onClick={resetInput} title="Reset foto">
-                <RotateCcw size={19} />
-              </button>
-            )}
-          </div>
+    <section className="scanner-section" id="scanner">
+      <SectionIntro
+        kicker="Scanner"
+        title="Unggah foto feses ayam untuk memulai screening awal."
+        text="Flow dibuat sederhana: unggah, lihat preview, analisis, lalu baca hasil dan rekomendasi."
+      />
 
-          <div className="preview-stage">
+      <div className="scanner-grid">
+        <div className="scanner-card glass-panel">
+          <StepIndicator result={result} isLoading={isLoading} selectedFile={selectedFile} />
+          <div
+            className={`drop-zone ${dragActive ? 'dragging' : ''} ${previewUrl || cameraActive ? 'has-preview' : ''}`}
+            onDragOver={(event) => handleDrag(event, true)}
+            onDragLeave={(event) => handleDrag(event, false)}
+            onDrop={handleDrop}
+          >
             {cameraActive ? (
-              <video ref={videoRef} className="camera-view" muted playsInline />
+              <video ref={videoRef} className="preview-media" muted playsInline />
             ) : previewUrl ? (
-              <img src={previewUrl} alt="Preview foto yang akan diprediksi" />
+              <img src={previewUrl} alt="Preview foto feses ayam" className="preview-media" />
             ) : (
-              <div className="empty-preview">
-                <ImagePlus size={50} />
-                <span>Foto belum dipilih</span>
+              <div className="drop-empty">
+                <span className="drop-icon">
+                  <ImagePlus size={42} />
+                </span>
+                <h3>Tarik gambar ke sini</h3>
+                <p>Atau pilih foto dari perangkat. Gunakan gambar yang dekat, terang, dan fokus.</p>
               </div>
             )}
           </div>
 
-          <div className="capture-controls">
-            <label className="control-button" title="Unggah gambar">
-              <Upload size={19} />
-              <span>Unggah</span>
-              <input type="file" accept="image/*" onChange={handleFileInput} />
-            </label>
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileInput} hidden />
+
+          <div className="scanner-actions">
+            <button className="secondary-action" type="button" onClick={() => fileInputRef.current?.click()}>
+              <Upload size={18} />
+              <span>Pilih Gambar</span>
+            </button>
             {cameraActive ? (
               <>
-                <button className="control-button primary" type="button" onClick={capturePhoto} title="Ambil foto">
-                  <Camera size={19} />
-                  <span>Ambil</span>
+                <button className="secondary-action accent" type="button" onClick={capturePhoto}>
+                  <Camera size={18} />
+                  <span>Ambil Foto</span>
                 </button>
-                <button className="control-button neutral" type="button" onClick={stopCamera} title="Tutup kamera">
-                  <X size={19} />
-                  <span>Tutup</span>
+                <button className="icon-action" type="button" onClick={stopCamera} title="Tutup kamera">
+                  <X size={18} />
                 </button>
               </>
             ) : (
-              <button className="control-button" type="button" onClick={startCamera} title="Buka kamera">
-                <Camera size={19} />
+              <button className="secondary-action" type="button" onClick={startCamera}>
+                <Camera size={18} />
                 <span>Kamera</span>
               </button>
             )}
           </div>
 
-          {cameraError && <p className="inline-alert">{cameraError}</p>}
-          {error && <p className="inline-alert strong">{error}</p>}
-
-          <button
-            className="scan-button"
-            type="button"
-            onClick={submitPrediction}
-            disabled={isLoading || !selectedFile}
-            title="Jalankan prediksi"
-          >
-            {isLoading ? <LoaderCircle className="spin" size={21} /> : <ScanSearch size={21} />}
-            <span>{isLoading ? 'Menganalisis foto...' : 'Prediksi Penyakit Ayam'}</span>
+          <button className="scan-action" type="button" onClick={submitPrediction} disabled={isLoading || !selectedFile}>
+            {isLoading ? <LoaderCircle className="spin" size={20} /> : <ScanSearch size={20} />}
+            <span>{isLoading ? 'Gambar sedang diperiksa...' : 'Analisis Sekarang'}</span>
           </button>
-        </section>
 
-        <section className={`diagnosis-panel ${result ? 'has-result' : ''}`}>
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Hasil Prediksi</p>
-              <h2>
-                {result?.status === 'invalid_input'
-                  ? 'Input perlu foto ulang'
-                  : result
-                    ? 'Diagnosis awal siap dibaca'
-                    : 'Belum ada hasil'}
-              </h2>
-            </div>
-            <span className={`status-pill ${result?.status || 'idle'}`}>
-              <StatusIcon size={18} />
-              <span>{result ? result.recommendation.confidence_level : 'siap'}</span>
-            </span>
-          </div>
-
-          {result ? (
-            <ResultContent result={result} />
-          ) : (
-            <div className="diagnosis-empty">
-              <Activity size={56} />
-              <h3>Masukkan foto untuk memulai screening</h3>
-              <p>
-                Setelah diproses, ChickPoo akan menampilkan prediksi penyakit ayam, persentase
-                keyakinan model, transparansi tiap kelas, dan rekomendasi tindakan.
-              </p>
-            </div>
+          {(selectedFile || result) && (
+            <button className="reset-link" type="button" onClick={resetInput}>
+              <RotateCcw size={16} />
+              <span>Upload Ulang</span>
+            </button>
           )}
-        </section>
 
-        {insightOpen && <InsightPanel result={result} />}
+          {cameraError && <p className="surface-alert">{cameraError}</p>}
+          {error && <p className="surface-alert danger">{error}</p>}
+        </div>
 
-        <SampleTray useSampleImage={useSampleImage} />
+        <ResultPanel result={result} isLoading={isLoading} resetInput={resetInput} />
       </div>
+
+      <SampleStrip useSampleImage={useSampleImage} />
     </section>
   );
 }
 
-function InsightPanel({ result }) {
-  return (
-    <aside className="insight-panel">
-      <section className="insight-section">
-        <p className="eyebrow">Validasi Input</p>
-        <h2>Foto harus menyerupai pola feses ayam</h2>
-        <p>
-          Input diperiksa dari kualitas foto, pola warna-tekstur, dan kemiripan embedding terhadap
-          distribusi dataset feses ayam.
-        </p>
-      </section>
+function StepIndicator({ result, isLoading, selectedFile }) {
+  const currentStep = useMemo(() => {
+    if (result?.status === 'invalid_input') return 1;
+    if (result) return 3;
+    if (isLoading) return 2;
+    if (selectedFile) return 1;
+    return 0;
+  }, [result, isLoading, selectedFile]);
 
-      <section className="insight-section">
-        <p className="eyebrow">Status</p>
-        <h2>{result ? result.recommendation.confidence_level : 'Siap memindai'}</h2>
-        <p>
-          {result
-            ? result.status_message
-            : 'Masukkan foto feses ayam yang fokus dan cukup terang untuk memulai screening.'}
-        </p>
-      </section>
+  const steps = [
+    { number: '01', label: 'Validasi objek' },
+    { number: '02', label: 'Prediksi penyakit' },
+    { number: '03', label: 'Rekomendasi awal' },
+  ];
+
+  return (
+    <div className="stepper" aria-label="Tahapan screening ChickPoo">
+      {steps.map((step, index) => (
+        <div className={`step-pill ${currentStep >= index + 1 ? 'active' : ''}`} key={step.number}>
+          <span>{step.number}</span>
+          <strong>{step.label}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ResultPanel({ result, isLoading, resetInput }) {
+  const StatusIcon = result ? statusIcon[result.status] || AlertTriangle : Gauge;
+  const tone = resultTone(result);
+
+  if (isLoading) {
+    return (
+      <aside className="result-card glass-panel loading-state">
+        <div className="loading-orbit">
+          <LoaderCircle className="spin" size={42} />
+        </div>
+        <h2>Gambar sedang diperiksa...</h2>
+        <p>Sistem sedang memastikan foto sesuai sebelum membaca kemungkinan kondisi kesehatan.</p>
+      </aside>
+    );
+  }
+
+  if (!result) {
+    return (
+      <aside className="result-card glass-panel empty-state">
+        <div className="empty-orb">
+          <Gauge size={42} />
+        </div>
+        <p className="eyebrow">Belum Ada Hasil</p>
+        <h2>Hasil screening akan muncul di sini.</h2>
+        <p>Unggah foto feses ayam yang jelas untuk melihat dugaan kondisi dan rekomendasi awal.</p>
+      </aside>
+    );
+  }
+
+  const invalidInput = result.status === 'invalid_input';
+  const confidence = invalidInput ? photoSuitabilityPercent(result) : result.confidence_percentage;
+
+  return (
+    <aside className={`result-card glass-panel ${tone}`}>
+      <div className="result-status">
+        <span>
+          <StatusIcon size={19} />
+          {invalidInput ? 'Objek tidak sesuai' : 'Feses ayam terdeteksi'}
+        </span>
+        <strong>{result.recommendation.confidence_level}</strong>
+      </div>
+
+      <div className="result-hero">
+        <div className="score-ring" style={{ '--score': `${Math.min(Number(confidence || 0), 100) * 3.6}deg` }}>
+          <span>{formatPercent(confidence)}</span>
+        </div>
+        <div>
+          <p className="eyebrow">{invalidInput ? 'Status Foto' : 'Hasil Screening'}</p>
+          <h2>{result.predicted_label}</h2>
+          <p>{result.status_message}</p>
+        </div>
+      </div>
+
+      {invalidInput ? (
+        <InvalidInputBlock result={result} resetInput={resetInput} />
+      ) : (
+        <DiseaseResult result={result} />
+      )}
+
+      <RecommendationCard recommendation={result.recommendation} />
     </aside>
   );
 }
 
-function SampleTray({ useSampleImage }) {
+function InvalidInputBlock({ result, resetInput }) {
   return (
-    <section className="sample-tray" aria-label="Contoh dataset ChickPoo">
-      <div className="sample-tray-copy">
-        <p className="eyebrow">Demo Dataset</p>
-        <h2>Contoh cepat</h2>
+    <div className="invalid-block">
+      <p>
+        Gambar yang diunggah belum terdeteksi sebagai feses ayam. Silakan gunakan foto feses ayam
+        yang lebih jelas agar analisis dapat dilanjutkan.
+      </p>
+      <div className="mini-meter">
+        <span>Skor kesesuaian foto</span>
+        <strong>{formatPercent(photoSuitabilityPercent(result))}</strong>
       </div>
-      <div className="sample-list">
+      <div className="progress-track">
+        <span style={{ width: `${Math.max(photoSuitabilityPercent(result), 1)}%` }} />
+      </div>
+      <button className="secondary-action accent" type="button" onClick={resetInput}>
+        <RotateCcw size={17} />
+        <span>Upload Ulang</span>
+      </button>
+    </div>
+  );
+}
+
+function DiseaseResult({ result }) {
+  return (
+    <div className="disease-panel">
+      {isLikelyFeces(result) && (
+        <div className="soft-warning">
+          Foto terindikasi sesuai, tetapi hasil tetap sebaiknya dibaca sebagai indikasi awal.
+        </div>
+      )}
+      <div className="probability-list">
+        {result.probabilities.map((item) => (
+          <div className={`probability-row ${item.key}`} key={item.key}>
+            <div className="probability-meta">
+              <span>{item.label}</span>
+              <strong>{formatPercent(item.percentage)}</strong>
+            </div>
+            <div className="progress-track" aria-hidden="true">
+              <span style={{ width: `${Math.max(item.percentage, 1)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RecommendationCard({ recommendation }) {
+  return (
+    <article className="recommendation-card">
+      <p className="eyebrow">Rekomendasi Awal</p>
+      <h3>{recommendation.headline}</h3>
+      <p>{recommendation.confidence_message}</p>
+      <ol>
+        {recommendation.actions.map((action) => (
+          <li key={action}>{action}</li>
+        ))}
+      </ol>
+      <small>{recommendation.disclaimer}</small>
+    </article>
+  );
+}
+
+function SampleStrip({ useSampleImage }) {
+  return (
+    <div className="sample-strip">
+      <div>
+        <p className="eyebrow">Contoh Cepat</p>
+        <h3>Coba contoh cepat</h3>
+      </div>
+      <div className="sample-actions">
         {sampleImages.map((item) => (
           <button type="button" key={item.label} onClick={() => useSampleImage(item)} title={`Pakai contoh ${item.label}`}>
             <img src={item.src} alt={`Contoh ${item.label}`} />
@@ -524,113 +626,65 @@ function SampleTray({ useSampleImage }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function WorkflowSection({ onStart }) {
+  const steps = [
+    ['01', 'Upload foto feses ayam', 'Ambil foto yang dekat, terang, dan fokus.'],
+    ['02', 'Foto diperiksa', 'Gambar dicek agar objek yang salah tidak langsung dianalisis.'],
+    ['03', 'Kondisi diprediksi', 'Jika foto sesuai, sistem membaca kemungkinan kondisi kesehatan.'],
+    ['04', 'Rekomendasi muncul', 'Peternak mendapat langkah awal yang mudah diikuti.'],
+  ];
+
+  return (
+    <section className="workflow-section" id="workflow">
+      <SectionIntro
+        kicker="Cara Kerja ChickPoo"
+        title="Dibuat singkat agar mudah dipakai di kandang."
+        text="ChickPoo membantu mempercepat keputusan awal tanpa membuat pengguna masuk ke alur yang rumit."
+      />
+      <div className="workflow-grid">
+        {steps.map(([number, title, text]) => (
+          <article className="workflow-card glass-panel" key={number}>
+            <span>{number}</span>
+            <h3>{title}</h3>
+            <p>{text}</p>
+          </article>
+        ))}
+      </div>
+      <div className="why-card glass-panel">
+        <Wheat size={30} />
+        <div>
+          <p className="eyebrow">Kenapa Penting?</p>
+          <h3>Deteksi awal membantu peternak bergerak lebih cepat.</h3>
+          <p>
+            Penyakit yang terlambat dikenali dapat menyebar di kandang dan menambah kerugian.
+            Screening awal memberi sinyal agar tindakan pencegahan bisa dimulai lebih cepat.
+          </p>
+        </div>
+        <button className="primary-action" type="button" onClick={onStart}>
+          <span>Mulai Scan</span>
+          <ChevronRight size={18} />
+        </button>
+      </div>
     </section>
   );
 }
 
-function ResultContent({ result }) {
-  const isInvalidInput = result.status === 'invalid_input';
-  const relevanceNotes = result.input_assessment?.flags || [];
-
+function ModelSection({ onStart }) {
   return (
-    <>
-      <div className={`diagnosis-spotlight ${isInvalidInput ? 'invalid' : ''}`}>
-        <span>{isInvalidInput ? 'Status input' : 'Prediksi penyakit ayam'}</span>
-        <h3>{result.predicted_label}</h3>
-        {isInvalidInput ? (
-          <div className="confidence-line">
-            <ShieldAlert size={21} />
-            <strong>Foto ulang</strong>
-            <em>objek tidak sesuai</em>
-          </div>
-        ) : (
-          <div className="confidence-line">
-            <Gauge size={21} />
-            <strong>{formatPercent(result.confidence_percentage)}</strong>
-            <em>keyakinan model</em>
-          </div>
-        )}
-        <p>{result.status_message}</p>
-      </div>
+    <section className="model-section" id="model">
+      <SectionIntro
+        kicker="Model"
+        title="Penjelasan teknis ditempatkan di sini."
+        text="Bagian ini disiapkan untuk dosen dan presentasi kelas, tanpa membebani tampilan scanner."
+      />
 
-      {isInvalidInput ? (
-        <article className="invalid-input-box">
-          <div className="subheading">
-            <p className="eyebrow">Validasi Objek</p>
-            <h3>Prediksi penyakit ditahan</h3>
-          </div>
-          <p>
-            Model klasifikasi tetap menghasilkan angka untuk setiap gambar, tetapi ChickPoo tidak
-            menampilkannya sebagai diagnosis ketika foto terindikasi bukan feses ayam.
-          </p>
-          {relevanceNotes.length > 0 && (
-            <ul>
-              {relevanceNotes.map((note) => (
-                <li key={note.code}>{note.message}</li>
-              ))}
-            </ul>
-          )}
-        </article>
-      ) : (
-        <div className="probability-section">
-          <div className="subheading">
-            <p className="eyebrow">Transparansi</p>
-            <h3>Persentase tiap kelas</h3>
-          </div>
-          <div className="probability-list">
-            {result.probabilities.map((item) => (
-              <div className="probability-row" key={item.key}>
-                <div className="probability-meta">
-                  <span>{item.label}</span>
-                  <strong>{formatPercent(item.percentage)}</strong>
-                </div>
-                <div className="bar-track" aria-hidden="true">
-                  <span style={{ width: `${Math.max(item.percentage, 1)}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <article className="recommendation-box">
-        <div className="subheading">
-          <p className="eyebrow">Rekomendasi</p>
-          <h3>{result.recommendation.headline}</h3>
-        </div>
-        <p>{result.recommendation.confidence_message}</p>
-        <ol>
-          {result.recommendation.actions.map((action) => (
-            <li key={action}>{action}</li>
-          ))}
-        </ol>
-      </article>
-
-      {result.recommendation.photo_notes.length > 0 && (
-        <article className="photo-notes">
-          <div className="subheading">
-            <p className="eyebrow">Catatan Foto</p>
-            <h3>Kualitas input</h3>
-          </div>
-          <ul>
-            {result.recommendation.photo_notes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </article>
-      )}
-
-      <p className="disclaimer">{result.recommendation.disclaimer}</p>
-    </>
-  );
-}
-
-function ModelView({ changeSection }) {
-  return (
-    <section className="model-view page-motion">
       <div className="metrics-grid">
-        {metrics.map((item) => (
-          <article key={item.label}>
+        {modelMetrics.map((item) => (
+          <article className="metric-card glass-panel" key={item.label}>
             <span>{item.label}</span>
             <strong>{item.value}</strong>
             <p>{item.note}</p>
@@ -639,26 +693,47 @@ function ModelView({ changeSection }) {
       </div>
 
       <div className="model-layout">
-        <figure className="evidence-figure">
-          <img src="/assets/confusion-matrix.png" alt="Confusion matrix model EfficientNetB0 frozen" />
-          <figcaption>Confusion matrix test set untuk model EfficientNetB0 frozen.</figcaption>
-        </figure>
+        <div className="evidence-stack">
+          <figure className="evidence-figure glass-panel">
+            <img src="/assets/object-validation-confusion-matrix.png" alt="Confusion matrix model validasi objek ChickPoo" />
+            <figcaption>Confusion matrix model validasi objek: feses ayam vs objek lain.</figcaption>
+          </figure>
+          <figure className="evidence-figure glass-panel">
+            <img src="/assets/confusion-matrix.png" alt="Confusion matrix model klasifikasi penyakit ChickPoo" />
+            <figcaption>Confusion matrix model klasifikasi penyakit pada test set.</figcaption>
+          </figure>
+        </div>
 
-        <section className="class-panel">
-          <p className="eyebrow">Kelas Model</p>
-          <h2>Empat kondisi yang dikenali</h2>
+        <section className="model-explain glass-panel">
+          <p className="eyebrow">Didukung Computer Vision</p>
+          <h3>Model bertingkat untuk mengurangi prediksi asal.</h3>
+          <div className="pipeline-steps">
+            <article>
+              <span>01</span>
+              <strong>Validasi objek</strong>
+              <p>Model pertama mengecek apakah gambar cukup sesuai sebagai feses ayam.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <strong>Klasifikasi penyakit</strong>
+              <p>Jika lolos, model kedua memprediksi healthy, coccidiosis, salmonella, atau Newcastle disease.</p>
+            </article>
+          </div>
+          <p className="model-note">
+            Model menganalisis pola visual seperti warna, tekstur, bentuk, dan konsistensi feses.
+            Hasil tetap diposisikan sebagai screening awal, bukan diagnosis final.
+          </p>
           <div className="class-list">
             {classInfo.map((item) => (
-              <article key={item.key}>
+              <article className={`class-item ${item.tone}`} key={item.key}>
                 <strong>{item.label}</strong>
                 <p>{item.text}</p>
               </article>
             ))}
           </div>
-          <button className="primary-action compact" type="button" onClick={() => changeSection('scanner')}>
-            <ScanSearch size={19} />
+          <button className="primary-action" type="button" onClick={onStart}>
+            <ScanSearch size={18} />
             <span>Coba Scanner</span>
-            <ChevronRight size={18} />
           </button>
         </section>
       </div>
@@ -666,86 +741,33 @@ function ModelView({ changeSection }) {
   );
 }
 
-function GuideView({ changeSection }) {
+function AboutSection({ onStart }) {
   return (
-    <section className="guide-view page-motion">
-      <div className="guide-layout">
-        <article className="guide-feature">
-          <Smartphone size={32} />
-          <h2>Prinsip utama</h2>
-          <p>
-            Foto terbaik adalah foto yang membuat feses menjadi objek utama, cukup terang, fokus,
-            dan tidak tertutup objek lain.
-          </p>
-          <button className="primary-action compact" type="button" onClick={() => changeSection('scanner')}>
-            <Camera size={19} />
-            <span>Buka Scanner</span>
-          </button>
-        </article>
-
-        <article className="guide-checklist">
-          <ClipboardList size={32} />
-          <h2>Checklist foto</h2>
-          <ol>
-            {guideItems.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ol>
-        </article>
-
-        <article className="guide-warning">
-          <ShieldAlert size={32} />
-          <h2>Jika objek bukan feses ayam</h2>
-          <p>
-            Sistem memakai quality check, sinyal warna-tekstur, dan pembanding embedding terhadap
-            dataset feses ayam. Jika pola visual berada di luar distribusi tersebut, ChickPoo akan
-            menahan prediksi penyakit dan meminta foto ulang.
-          </p>
-        </article>
+    <section className="about-section">
+      <div className="closing-card glass-panel">
+        <p className="eyebrow">Tentang ChickPoo</p>
+        <h2>Alat screening awal untuk peternak kecil.</h2>
+        <p>
+          ChickPoo membantu membaca tanda awal dari foto feses, menyajikan tingkat keyakinan, dan
+          memberi rekomendasi awal. Untuk keputusan pengobatan, tetap konsultasikan dengan petugas
+          kesehatan hewan.
+        </p>
+        <button className="primary-action" type="button" onClick={onStart}>
+          <span>Mulai Scan</span>
+          <ArrowRight size={18} />
+        </button>
       </div>
     </section>
   );
 }
 
-function AboutView({ changeSection }) {
+function SectionIntro({ kicker, title, text }) {
   return (
-    <section className="about-view page-motion">
-      <div className="about-grid">
-        <article>
-          <Wheat size={30} />
-          <h2>Masalah lapangan</h2>
-          <p>
-            Gejala penyakit ayam sering terlambat dikenali. Untuk peternak kecil, keterlambatan
-            ini bisa berujung pada kerugian ekonomi yang besar.
-          </p>
-        </article>
-        <article>
-          <ScanSearch size={30} />
-          <h2>Solusi MVP</h2>
-          <p>
-            ChickPoo membantu melakukan screening awal melalui foto feses, lalu menyajikan hasil
-            dalam bahasa yang mudah dibaca.
-          </p>
-        </article>
-        <article>
-          <ShieldCheck size={30} />
-          <h2>Batasan etis</h2>
-          <p>
-            Hasil aplikasi bukan diagnosis final. Pengguna tetap perlu memeriksa kondisi ayam dan
-            berkonsultasi dengan petugas kesehatan hewan.
-          </p>
-        </article>
-      </div>
-
-      <section className="closing-band">
-        <p className="eyebrow">ChickPoo</p>
-        <h2>Lebih cepat membaca tanda awal, lebih siap mengambil tindakan.</h2>
-        <button className="primary-action compact" type="button" onClick={() => changeSection('scanner')}>
-          <ArrowRight size={19} />
-          <span>Mulai Deteksi</span>
-        </button>
-      </section>
-    </section>
+    <div className="section-intro">
+      <p className="eyebrow">{kicker}</p>
+      <h2>{title}</h2>
+      <p>{text}</p>
+    </div>
   );
 }
 

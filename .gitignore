@@ -27,8 +27,10 @@ salmo/
 
 # Training experiment outputs.
 experiments/
+chickpoo_object_validation_all_outputs/
 
 # Keep only the model artifacts required by the app.
 models/*
 !models/best_model.keras
-!models/feces_reference_stats.npz
+!models/object_validation_model.keras
+!models/object_validation_metadata.json
