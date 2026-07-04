@@ -5,32 +5,48 @@ __pycache__/
 .venv/
 venv/
 env/
+.ipynb_checkpoints/
+*.h5
+*.keras
+*.pkl
+*.pt
+*.pth
+*.onnx
 
 # Node / frontend build
 frontend/node_modules/
 frontend/dist/
+frontend/build/
+frontend/.next/
+frontend/.vercel/
+frontend/.cache/
+node_modules/
+dist/
+build/
+.next/
+.vercel/
+.cache/
 
 # Environment and logs
 .env
-*.env
-logs/
-run_logs/
+.env.local
+.env.*.local
 *.log
+*.tmp
+*.bak
 
-# Raw datasets and archives are too large for the GitHub repository.
+# macOS
+.DS_Store
+
+# Raw datasets and archives
 data/
-cocci/
-healthy/
-ncd/
-salmo/
 *.zip
+*.rar
+*.7z
 
 # Training experiment outputs.
 experiments/
-chickpoo_object_validation_all_outputs/
 
 # Keep only the model artifacts required by the app.
-models/*
-!models/best_model.keras
-!models/object_validation_model.keras
-!models/object_validation_metadata.json
+!models/best_disease_classifier_model.keras
+!models/best_object_validation_model.keras

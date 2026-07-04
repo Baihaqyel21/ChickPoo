@@ -1,24 +1,27 @@
 import {
+  Activity,
   AlertTriangle,
   ArrowRight,
   BarChart3,
   Camera,
   CheckCircle2,
   ChevronRight,
-  FileText,
   Gauge,
   ImagePlus,
   LoaderCircle,
+  Menu,
   RotateCcw,
   ScanSearch,
   ShieldAlert,
   ShieldCheck,
+  Moon,
   Sparkles,
+  Sun,
   Upload,
   Wheat,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -37,17 +40,17 @@ const sampleImages = [
 ];
 
 const modelMetrics = [
-  { label: 'Validasi Objek', value: '99.54%', note: 'akurasi pada test set validasi objek' },
-  { label: 'Presisi Gate', value: '99.90%', note: 'ketepatan saat menerima feses ayam' },
-  { label: 'Accuracy', value: '98.34%', note: 'akurasi model klasifikasi penyakit' },
-  { label: 'Macro F1', value: '96.91%', note: 'metrik utama untuk kelas tidak seimbang' },
+  { label: 'Object Gate Accuracy', value: '99.58%', note: 'Akurasi validasi feses ayam vs objek lain.', Icon: ShieldCheck },
+  { label: 'Object Gate F1', value: '99.61%', note: 'Keseimbangan ketepatan dan sensitivitas validasi objek.', Icon: CheckCircle2 },
+  { label: 'Disease Classifier Accuracy', value: '97.85%', note: 'Akurasi klasifikasi kondisi kesehatan pada data test.', Icon: BarChart3 },
+  { label: 'Macro F1', value: '97.38%', note: 'Keseimbangan performa antar kelas penyakit.', Icon: Gauge },
 ];
 
 const classInfo = [
   { label: 'Sehat', key: 'healthy', tone: 'good', text: 'Pola visual mendekati kondisi normal.' },
-  { label: 'Coccidiosis', key: 'cocci', tone: 'warning', text: 'Perlu pemantauan karena dapat mengganggu produktivitas.' },
+  { label: 'Coccidiosis', key: 'cocci', tone: 'amber', text: 'Perlu pemantauan karena dapat mengganggu produktivitas.' },
+  { label: 'Salmonella', key: 'salmo', tone: 'orange', text: 'Berkaitan dengan potensi gangguan pencernaan dan sanitasi.' },
   { label: 'Newcastle Disease', key: 'ncd', tone: 'danger', text: 'Kelas berisiko tinggi dan perlu tindak lanjut cepat.' },
-  { label: 'Salmonella', key: 'salmo', tone: 'warning', text: 'Berkaitan dengan potensi gangguan pencernaan dan sanitasi.' },
 ];
 
 const statusIcon = {
@@ -57,8 +60,46 @@ const statusIcon = {
   invalid_input: ShieldAlert,
 };
 
-function formatPercent(value) {
-  return `${Number(value || 0).toFixed(2)}%`;
+const confusionMatrices = [
+  {
+    title: 'Object Gate Confusion Matrix',
+    labels: ['not_chicken_feces', 'chicken_feces'],
+    data: [
+      [501, 1],
+      [6, 1016],
+    ],
+  },
+  {
+    title: 'Disease Classifier Confusion Matrix',
+    labels: ['cocci', 'healthy', 'ncd', 'salmo'],
+    data: [
+      [313, 0, 3, 0],
+      [0, 303, 2, 3],
+      [0, 3, 53, 1],
+      [2, 2, 1, 336],
+    ],
+  },
+];
+
+function getInitialTheme() {
+  if (typeof window === 'undefined') return 'dark';
+  try {
+    const savedTheme = window.localStorage.getItem('theme');
+    if (savedTheme === 'dark' || savedTheme === 'light') return savedTheme;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'dark';
+  }
+}
+
+function formatPercent(value, maximumFractionDigits = 1) {
+  const safeValue = Number.isFinite(Number(value)) ? Number(value) : 0;
+  const rounded = safeValue.toFixed(maximumFractionDigits).replace(/\.0$/, '');
+  return `${rounded}%`;
+}
+
+function formatWholePercent(value) {
+  return `${Math.round(Number(value || 0))}%`;
 }
 
 function objectValidationPercent(result) {
@@ -66,22 +107,20 @@ function objectValidationPercent(result) {
 }
 
 function isLikelyFeces(result) {
-  return result?.object_validation?.status === 'likely_feces';
+  return result?.object_validation?.status === 'accepted';
 }
 
 function photoSuitabilityPercent(result) {
-  if (isLikelyFeces(result)) {
-    return result?.object_validation?.visual_support?.support_score ?? objectValidationPercent(result);
-  }
   return objectValidationPercent(result);
 }
 
 function resultTone(result) {
   if (!result) return 'idle';
-  if (result.status === 'invalid_input') return 'danger';
+  if (result.status === 'invalid_input') return 'invalid';
   if (result.predicted_class === 'healthy') return 'good';
   if (result.predicted_class === 'ncd') return 'danger';
-  return 'warning';
+  if (result.predicted_class === 'salmo') return 'orange';
+  return 'amber';
 }
 
 function App() {
@@ -93,13 +132,28 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [activeSection, setActiveSection] = useState('home');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, setTheme] = useState(getInitialTheme);
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const themeSwitchTimerRef = useRef(null);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    try {
+      window.localStorage.setItem('theme', theme);
+    } catch {
+      // Theme still applies for the active session when storage is unavailable.
+    }
+  }, [theme]);
 
   useEffect(() => {
     return () => {
       stopCamera();
+      window.clearTimeout(themeSwitchTimerRef.current);
+      document.documentElement.classList.remove('theme-changing');
     };
   }, []);
 
@@ -117,7 +171,27 @@ function App() {
     });
   }, [cameraActive]);
 
+  useEffect(() => {
+    const sectionIds = ['home', 'scanner', 'workflow', 'model'];
+    const updateActiveSection = () => {
+      const current = sectionIds
+        .map((id) => {
+          const element = document.getElementById(id);
+          if (!element) return { id, top: Number.POSITIVE_INFINITY };
+          return { id, top: Math.abs(element.getBoundingClientRect().top - 120) };
+        })
+        .sort((a, b) => a.top - b.top)[0];
+      if (current?.id) setActiveSection(current.id);
+    };
+
+    updateActiveSection();
+    window.addEventListener('scroll', updateActiveSection, { passive: true });
+    return () => window.removeEventListener('scroll', updateActiveSection);
+  }, []);
+
   function scrollToSection(sectionId) {
+    setActiveSection(sectionId);
+    setMenuOpen(false);
     document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -242,10 +316,26 @@ function App() {
     });
   }
 
+  function toggleTheme() {
+    document.documentElement.classList.add('theme-changing');
+    window.clearTimeout(themeSwitchTimerRef.current);
+    setTheme((currentTheme) => (currentTheme === 'dark' ? 'light' : 'dark'));
+    themeSwitchTimerRef.current = window.setTimeout(() => {
+      document.documentElement.classList.remove('theme-changing');
+    }, 260);
+  }
+
   return (
     <main className="app-shell">
       <AmbientBackground />
-      <TopNav onNavigate={scrollToSection} />
+      <TopNav
+        activeSection={activeSection}
+        menuOpen={menuOpen}
+        onNavigate={scrollToSection}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onToggleMenu={() => setMenuOpen((open) => !open)}
+      />
       <HeroSection onStart={() => scrollToSection('scanner')} onLearn={() => scrollToSection('workflow')} />
       <ScannerSection
         selectedFile={selectedFile}
@@ -269,6 +359,7 @@ function App() {
         useSampleImage={useSampleImage}
       />
       <WorkflowSection onStart={() => scrollToSection('scanner')} />
+      <ImpactSection />
       <ModelSection onStart={() => scrollToSection('scanner')} />
       <AboutSection onStart={() => scrollToSection('scanner')} />
     </main>
@@ -279,25 +370,45 @@ function AmbientBackground() {
   return <div className="ambient" aria-hidden="true" />;
 }
 
-function TopNav({ onNavigate }) {
+function TopNav({ activeSection, menuOpen, onNavigate, theme, onToggleTheme, onToggleMenu }) {
   return (
-    <header className="topbar">
+    <header className={`topbar ${menuOpen ? 'menu-open' : ''}`}>
       <button className="brand" type="button" onClick={() => onNavigate('home')} title="Kembali ke beranda">
         <span className="brand-mark">
           <img src="/assets/poop.png" alt="" />
         </span>
         <span>
           <strong>ChickPoo</strong>
-          <small>Pemeriksaan awal</small>
+          <small>Smart Poultry Assistant</small>
         </span>
+      </button>
+      <button className="menu-toggle" type="button" onClick={onToggleMenu} aria-label="Buka menu navigasi" aria-expanded={menuOpen}>
+        {menuOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
       <nav className="nav-links" aria-label="Navigasi utama">
         {navItems.map((item) => (
-          <button key={item.id} type="button" onClick={() => onNavigate(item.id)}>
+          <button
+            className={activeSection === item.id ? 'active' : ''}
+            key={item.id}
+            type="button"
+            onClick={() => onNavigate(item.id)}
+          >
             {item.label}
           </button>
         ))}
       </nav>
+      <button
+        className="theme-toggle"
+        type="button"
+        onClick={onToggleTheme}
+        aria-label={`Ubah ke ${theme === 'dark' ? 'light mode' : 'dark mode'}`}
+        title={`Ubah ke ${theme === 'dark' ? 'light mode' : 'dark mode'}`}
+      >
+        <span className="theme-toggle-icon" aria-hidden="true">
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </span>
+        <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+      </button>
       <button className="nav-cta" type="button" onClick={() => onNavigate('scanner')}>
         <ScanSearch size={18} />
         <span>Mulai Scan</span>
@@ -310,45 +421,86 @@ function HeroSection({ onStart, onLearn }) {
   return (
     <section className="hero-section" id="home">
       <div className="hero-copy">
-        <p className="eyebrow">Peternakan modern, keputusan lebih cepat</p>
-        <h1>Screening Kesehatan Ayam dari Foto Feses</h1>
+        <div className="hero-badge">
+          <Activity size={16} />
+          <span>Your Smart Poultry Assistant</span>
+        </div>
+        <h1>Screening Kesehatan Ayam yang Lebih Cepat, Cerdas, dan Terarah.</h1>
         <p>
-          ChickPoo membantu peternak membaca sinyal awal kesehatan ayam dari foto feses,
-          lalu menyajikan peluang kondisi dan rekomendasi tindakan dengan bahasa yang mudah dipahami.
+          ChickPoo membantu peternak memvalidasi foto, membaca kemungkinan kondisi kesehatan, dan menyajikan
+          rekomendasi awal dalam satu alur yang sederhana.
         </p>
-        <div className="hero-actions">
-          <button className="primary-action" type="button" onClick={onStart}>
-            <ScanSearch size={20} />
-            <span>Mulai Scan</span>
-          </button>
-          <button className="secondary-action" type="button" onClick={onLearn}>
-            <span>Lihat Cara Kerja</span>
-            <ArrowRight size={18} />
-          </button>
+        <div className="hero-cta-zone">
+          <div className="hero-actions">
+            <button className="primary-action hero-primary" type="button" onClick={onStart}>
+              <ScanSearch size={20} />
+              <span>Mulai Scan</span>
+              <ChevronRight className="cta-arrow" size={18} />
+            </button>
+            <button className="secondary-action hero-secondary" type="button" onClick={onLearn}>
+              <span>Lihat Cara Kerja</span>
+              <ArrowRight size={18} />
+            </button>
+          </div>
+          <p className="hero-microcopy">
+            <Sparkles size={15} />
+            Screening awal dan rekomendasi tindakan berjalan dalam satu proses.
+          </p>
         </div>
         <div className="hero-proof" aria-label="Ringkasan alur ChickPoo">
-          <span>Upload foto</span>
-          <span>Screening objek</span>
+          <span>Alur sederhana</span>
+          <span>Persentase transparan</span>
           <span>Rekomendasi tindakan</span>
         </div>
       </div>
 
-      <aside className="hero-visual" aria-label="Visual peternakan ChickPoo">
-        <div className="farm-card">
-          <img src="/assets/background-landingpage.jpg" alt="Peternakan ayam modern" />
-          <div className="farm-card-glow" aria-hidden="true" />
-          <div className="farm-caption">
-            <span>ChickPoo</span>
-            <strong>Dari kandang, keputusan awal lebih cepat.</strong>
+      <aside className="hero-console-panel" aria-label="Mockup diagnostic console ChickPoo">
+        <div className="diagnostic-console">
+          <div className="console-topline">
+            <span>
+              <Activity size={16} />
+              Live diagnostic console
+            </span>
+            <strong>Ready</strong>
           </div>
-        </div>
-        <div className="floating-card floating-card-top">
-          <ShieldCheck size={18} />
-          <span>Foto dicek lebih dulu sebelum hasil penyakit tampil.</span>
-        </div>
-        <div className="floating-card floating-card-bottom">
-          <Sparkles size={18} />
-          <span>Hasil dibuat ringkas, transparan, dan mudah dijelaskan.</span>
+
+          <div className="console-visual">
+            <img className="console-support-photo" src="/assets/ayam-putih.webp" alt="" aria-hidden="true" />
+            <span className="console-grid" aria-hidden="true" />
+            <span className="console-scan-core" aria-hidden="true" />
+            <div className="console-status-card object">
+              <ShieldCheck size={18} />
+              <div>
+                <span style={{ fontWeight: 760 }}>Risiko Terbaca</span>
+                <strong style={{ fontWeight: 800, fontSize: "0.95rem" }}>Keputusan awal lebih cepat</strong>
+              </div>
+            </div>
+            <div className="console-status-card disease">
+              <BarChart3 size={18} />
+              <div>
+                <span>Disease Classifier Active</span>
+                <strong>4 kelas</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="console-bottom">
+            <div className="console-confidence">
+              <div className="hero-score-ring" style={{ '--score': '352deg' }}>
+                <span>{formatWholePercent(99)}</span>
+              </div>
+              <div>
+                <p className="eyebrow">Confidence preview</p>
+                <h3>Screening awal siap</h3>
+                <p>Validasi, prediksi, dan rekomendasi diringkas dalam satu alur.</p>
+              </div>
+            </div>
+            <div className="console-bars" aria-hidden="true">
+              <span style={{ '--bar': '92%' }} />
+              <span style={{ '--bar': '76%' }} />
+              <span style={{ '--bar': '58%' }} />
+            </div>
+          </div>
         </div>
       </aside>
     </section>
@@ -379,16 +531,23 @@ function ScannerSection({
   return (
     <section className="scanner-section" id="scanner">
       <SectionIntro
-        kicker="Scanner"
+        kicker="Scanner Diagnostik"
         title="Unggah foto feses ayam untuk memulai screening awal."
-        text="Flow dibuat sederhana: unggah, lihat preview, analisis, lalu baca hasil dan rekomendasi."
+        text="Upload, preview, validasi objek, prediksi kondisi, dan rekomendasi awal berjalan dalam satu modul diagnostik."
       />
 
       <div className="scanner-grid">
         <div className="scanner-card glass-panel">
+          <div className="device-header">
+            <span>
+              <ScanSearch size={18} />
+              ChickPoo scanner
+            </span>
+            <strong>{isLoading ? 'Scanning' : selectedFile ? 'Ready' : 'Standby'}</strong>
+          </div>
           <StepIndicator result={result} isLoading={isLoading} selectedFile={selectedFile} />
           <div
-            className={`drop-zone ${dragActive ? 'dragging' : ''} ${previewUrl || cameraActive ? 'has-preview' : ''}`}
+            className={`drop-zone ${dragActive ? 'dragging' : ''} ${previewUrl || cameraActive ? 'has-preview' : ''} ${isLoading ? 'is-scanning' : ''}`}
             onDragOver={(event) => handleDrag(event, true)}
             onDragLeave={(event) => handleDrag(event, false)}
             onDrop={handleDrop}
@@ -406,6 +565,12 @@ function ScannerSection({
                 <p>Atau pilih foto dari perangkat. Gunakan gambar yang dekat, terang, dan fokus.</p>
               </div>
             )}
+            <div className="scanner-reticle" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+              <span />
+            </div>
           </div>
 
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileInput} hidden />
@@ -413,7 +578,7 @@ function ScannerSection({
           <div className="scanner-actions">
             <button className="secondary-action" type="button" onClick={() => fileInputRef.current?.click()}>
               <Upload size={18} />
-              <span>Pilih Gambar</span>
+              <span>Upload Gambar</span>
             </button>
             {cameraActive ? (
               <>
@@ -435,7 +600,7 @@ function ScannerSection({
 
           <button className="scan-action" type="button" onClick={submitPrediction} disabled={isLoading || !selectedFile}>
             {isLoading ? <LoaderCircle className="spin" size={20} /> : <ScanSearch size={20} />}
-            <span>{isLoading ? 'Gambar sedang diperiksa...' : 'Analisis Sekarang'}</span>
+            <span>{isLoading ? 'Foto sedang diperiksa...' : 'Analisis Sekarang'}</span>
           </button>
 
           {(selectedFile || result) && (
@@ -459,17 +624,18 @@ function ScannerSection({
 
 function StepIndicator({ result, isLoading, selectedFile }) {
   const currentStep = useMemo(() => {
-    if (result?.status === 'invalid_input') return 1;
-    if (result) return 3;
+    if (result?.status === 'invalid_input') return 2;
+    if (result) return 4;
     if (isLoading) return 2;
     if (selectedFile) return 1;
     return 0;
   }, [result, isLoading, selectedFile]);
 
   const steps = [
-    { number: '01', label: 'Validasi objek' },
-    { number: '02', label: 'Prediksi penyakit' },
-    { number: '03', label: 'Rekomendasi awal' },
+    { number: '01', label: 'Upload foto' },
+    { number: '02', label: 'Validasi objek' },
+    { number: '03', label: 'Prediksi penyakit' },
+    { number: '04', label: 'Rekomendasi' },
   ];
 
   return (
@@ -491,11 +657,11 @@ function ResultPanel({ result, isLoading, resetInput }) {
   if (isLoading) {
     return (
       <aside className="result-card glass-panel loading-state">
-        <div className="loading-orbit">
+        <div className="loading-orbit diagnostic-loader">
           <LoaderCircle className="spin" size={42} />
         </div>
-        <h2>Gambar sedang diperiksa...</h2>
-        <p>Sistem sedang memastikan foto sesuai sebelum membaca kemungkinan kondisi kesehatan.</p>
+        <h2>Foto sedang diperiksa...</h2>
+        <p>Foto divalidasi terlebih dahulu agar objek yang salah tidak langsung diprediksi sebagai penyakit.</p>
       </aside>
     );
   }
@@ -507,8 +673,8 @@ function ResultPanel({ result, isLoading, resetInput }) {
           <Gauge size={42} />
         </div>
         <p className="eyebrow">Belum Ada Hasil</p>
-        <h2>Hasil screening akan muncul di sini.</h2>
-        <p>Unggah foto feses ayam yang jelas untuk melihat dugaan kondisi dan rekomendasi awal.</p>
+        <h2>Unggah foto feses ayam untuk memulai screening awal.</h2>
+        <p>Hasil validasi objek, prediksi penyakit, dan rekomendasi akan tampil di panel ini.</p>
       </aside>
     );
   }
@@ -526,13 +692,19 @@ function ResultPanel({ result, isLoading, resetInput }) {
         <strong>{result.recommendation.confidence_level}</strong>
       </div>
 
+      <div className="result-flow">
+        <span className="active">Validasi objek</span>
+        <span className={!invalidInput ? 'active' : ''}>Prediksi penyakit</span>
+        <span className={!invalidInput ? 'active' : ''}>Rekomendasi awal</span>
+      </div>
+
       <div className="result-hero">
         <div className="score-ring" style={{ '--score': `${Math.min(Number(confidence || 0), 100) * 3.6}deg` }}>
           <span>{formatPercent(confidence)}</span>
         </div>
         <div>
           <p className="eyebrow">{invalidInput ? 'Status Foto' : 'Hasil Screening'}</p>
-          <h2>{result.predicted_label}</h2>
+          <h2>{invalidInput ? 'Objek tidak sesuai' : result.predicted_label}</h2>
           <p>{result.status_message}</p>
         </div>
       </div>
@@ -552,8 +724,7 @@ function InvalidInputBlock({ result, resetInput }) {
   return (
     <div className="invalid-block">
       <p>
-        Gambar yang diunggah belum terdeteksi sebagai feses ayam. Silakan gunakan foto feses ayam
-        yang lebih jelas agar analisis dapat dilanjutkan.
+        Gambar belum terdeteksi sebagai feses ayam. Silakan unggah foto yang lebih jelas.
       </p>
       <div className="mini-meter">
         <span>Skor kesesuaian foto</span>
@@ -571,8 +742,14 @@ function InvalidInputBlock({ result, resetInput }) {
 }
 
 function DiseaseResult({ result }) {
+  const lowConfidence = Number(result.confidence_percentage || 0) < 60;
   return (
     <div className="disease-panel">
+      {lowConfidence && (
+        <div className="soft-warning">
+          Hasil belum cukup yakin. Coba unggah foto dengan pencahayaan lebih baik.
+        </div>
+      )}
       {isLikelyFeces(result) && (
         <div className="soft-warning">
           Foto terindikasi sesuai, tetapi hasil tetap sebaiknya dibaca sebagai indikasi awal.
@@ -601,12 +778,15 @@ function RecommendationCard({ recommendation }) {
       <p className="eyebrow">Rekomendasi Awal</p>
       <h3>{recommendation.headline}</h3>
       <p>{recommendation.confidence_message}</p>
-      <ol>
+      <ul>
         {recommendation.actions.map((action) => (
-          <li key={action}>{action}</li>
+          <li key={action}>
+            <CheckCircle2 size={17} />
+            <span>{action}</span>
+          </li>
         ))}
-      </ol>
-      <small>{recommendation.disclaimer}</small>
+      </ul>
+      <small>Hasil ini adalah screening awal, bukan diagnosis final.</small>
     </article>
   );
 }
@@ -632,23 +812,26 @@ function SampleStrip({ useSampleImage }) {
 
 function WorkflowSection({ onStart }) {
   const steps = [
-    ['01', 'Upload foto feses ayam', 'Ambil foto yang dekat, terang, dan fokus.'],
-    ['02', 'Foto diperiksa', 'Gambar dicek agar objek yang salah tidak langsung dianalisis.'],
-    ['03', 'Kondisi diprediksi', 'Jika foto sesuai, sistem membaca kemungkinan kondisi kesehatan.'],
-    ['04', 'Rekomendasi muncul', 'Peternak mendapat langkah awal yang mudah diikuti.'],
+    { number: '01', title: 'Upload Foto', text: 'Masukkan foto feses ayam yang jelas.', Icon: Upload },
+    { number: '02', title: 'Validasi Objek', text: 'Foto dicek apakah sudah sesuai.', Icon: ShieldCheck },
+    { number: '03', title: 'Prediksi Kondisi', text: 'Jika valid, sistem membaca kemungkinan kondisi kesehatan.', Icon: BarChart3 },
+    { number: '04', title: 'Rekomendasi Awal', text: 'Langkah awal ditampilkan secara ringkas dan mudah dipahami.', Icon: CheckCircle2 },
   ];
 
   return (
     <section className="workflow-section" id="workflow">
       <SectionIntro
         kicker="Cara Kerja ChickPoo"
-        title="Dibuat singkat agar mudah dipakai di kandang."
-        text="ChickPoo membantu mempercepat keputusan awal tanpa membuat pengguna masuk ke alur yang rumit."
+        title="Dari Foto ke Rekomendasi dalam Satu Alur."
+        text="ChickPoo menyederhanakan proses screening agar peternak dapat bergerak lebih cepat."
       />
-      <div className="workflow-grid">
-        {steps.map(([number, title, text]) => (
-          <article className="workflow-card glass-panel" key={number}>
-            <span>{number}</span>
+      <div className="workflow-timeline">
+        {steps.map(({ number, title, text, Icon }) => (
+          <article className="timeline-node" key={number}>
+            <span className="timeline-icon">
+              <Icon size={20} />
+            </span>
+            <small>{number}</small>
             <h3>{title}</h3>
             <p>{text}</p>
           </article>
@@ -664,6 +847,9 @@ function WorkflowSection({ onStart }) {
             Screening awal memberi sinyal agar tindakan pencegahan bisa dimulai lebih cepat.
           </p>
         </div>
+        <figure className="workflow-photo" aria-hidden="true">
+          <img src="/assets/ayam-putih.webp" alt="" />
+        </figure>
         <button className="primary-action" type="button" onClick={onStart}>
           <span>Mulai Scan</span>
           <ChevronRight size={18} />
@@ -673,56 +859,85 @@ function WorkflowSection({ onStart }) {
   );
 }
 
+function ImpactSection() {
+  return (
+    <section className="impact-section" aria-label="Konteks peternak ChickPoo">
+      <div className="impact-card glass-panel">
+        <figure className="impact-photo">
+          <img src="/assets/peternak-ayam.webp" alt="Peternak memeriksa ayam di kandang" />
+        </figure>
+        <div className="impact-copy">
+          <p className="eyebrow">Human Trust</p>
+          <h2>Dibuat untuk membantu peternak bergerak lebih cepat.</h2>
+          <p>
+            ChickPoo membantu peternak melakukan screening awal dari foto feses ayam, sehingga
+            tindakan pencegahan dapat dilakukan lebih cepat sebelum kondisi memburuk.
+          </p>
+          <div className="impact-points" aria-label="Nilai utama ChickPoo">
+            <span>Screening awal</span>
+            <span>Alur sederhana</span>
+            <span>Rekomendasi siap dibaca</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ModelSection({ onStart }) {
   return (
     <section className="model-section" id="model">
       <SectionIntro
-        kicker="Model"
-        title="Penjelasan teknis ditempatkan di sini."
-        text="Bagian ini disiapkan untuk dosen dan presentasi kelas, tanpa membebani tampilan scanner."
+        kicker="Product Analytics"
+        title="Screening dua tahap untuk hasil yang lebih terkontrol."
+        text="Model pertama memvalidasi objek, lalu model kedua membaca kemungkinan kondisi kesehatan jika foto dinyatakan sesuai."
       />
 
-      <div className="metrics-grid">
-        {modelMetrics.map((item) => (
-          <article className="metric-card glass-panel" key={item.label}>
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-            <p>{item.note}</p>
-          </article>
-        ))}
-      </div>
-
-      <div className="model-layout">
-        <div className="evidence-stack">
-          <figure className="evidence-figure glass-panel">
-            <img src="/assets/object-validation-confusion-matrix.png" alt="Confusion matrix model validasi objek ChickPoo" />
-            <figcaption>Confusion matrix model validasi objek: feses ayam vs objek lain.</figcaption>
-          </figure>
-          <figure className="evidence-figure glass-panel">
-            <img src="/assets/confusion-matrix.png" alt="Confusion matrix model klasifikasi penyakit ChickPoo" />
-            <figcaption>Confusion matrix model klasifikasi penyakit pada test set.</figcaption>
-          </figure>
+      <div className="model-console glass-panel">
+        <div className="model-console-head">
+          <div>
+            <p className="eyebrow">Performance Console</p>
+            <h3>Data performa disajikan sebagai panel produk, bukan laporan tempelan.</h3>
+          </div>
+          <button className="primary-action" type="button" onClick={onStart}>
+            <ScanSearch size={18} />
+            <span>Mulai Scan</span>
+          </button>
         </div>
 
-        <section className="model-explain glass-panel">
-          <p className="eyebrow">Didukung Computer Vision</p>
-          <h3>Model bertingkat untuk mengurangi prediksi asal.</h3>
+        <div className="metrics-grid">
+          {modelMetrics.map((item) => (
+            <article className="metric-card" key={item.label}>
+              <span className="metric-icon">
+                <item.Icon size={18} />
+              </span>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <p>{item.note}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="model-layout">
+          <section className="model-explain">
+            <p className="eyebrow">Model Pipeline</p>
+            <h3>Mengapa dua tahap?</h3>
+            <p className="model-note">
+              Validasi objek menahan gambar yang tidak sesuai. Klasifikasi penyakit hanya berjalan
+              jika objek valid. Pendekatan ini membantu mengurangi prediksi yang tidak masuk akal.
+            </p>
           <div className="pipeline-steps">
             <article>
               <span>01</span>
               <strong>Validasi objek</strong>
-              <p>Model pertama mengecek apakah gambar cukup sesuai sebagai feses ayam.</p>
+              <p>Memastikan gambar yang masuk benar-benar menyerupai feses ayam.</p>
             </article>
             <article>
               <span>02</span>
               <strong>Klasifikasi penyakit</strong>
-              <p>Jika lolos, model kedua memprediksi healthy, coccidiosis, salmonella, atau Newcastle disease.</p>
+              <p>Jika valid, model membaca kemungkinan healthy, coccidiosis, salmonella, atau Newcastle Disease.</p>
             </article>
           </div>
-          <p className="model-note">
-            Model menganalisis pola visual seperti warna, tekstur, bentuk, dan konsistensi feses.
-            Hasil tetap diposisikan sebagai screening awal, bukan diagnosis final.
-          </p>
           <div className="class-list">
             {classInfo.map((item) => (
               <article className={`class-item ${item.tone}`} key={item.key}>
@@ -731,31 +946,135 @@ function ModelSection({ onStart }) {
               </article>
             ))}
           </div>
-          <button className="primary-action" type="button" onClick={onStart}>
-            <ScanSearch size={18} />
-            <span>Coba Scanner</span>
-          </button>
-        </section>
+          </section>
+
+          <div className="matrix-stack">
+            {confusionMatrices.map((matrix) => (
+              <ConfusionMatrixHeatmap
+                key={matrix.title}
+                title={matrix.title}
+                classes={matrix.labels}
+                matrix={matrix.data}
+                caption="Nilai diagonal menunjukkan prediksi yang benar, sedangkan nilai di luar diagonal menunjukkan kesalahan klasifikasi."
+              />
+            ))}
+          </div>
+        </div>
+
+        <article className="insight-card">
+          <p className="eyebrow">Insight</p>
+          <h3>Kenapa dua tahap?</h3>
+          <p>
+            Model digunakan sebagai screening awal dan tetap membutuhkan validasi petugas kesehatan
+            hewan untuk keputusan pengobatan.
+          </p>
+        </article>
       </div>
     </section>
   );
+}
+
+function ConfusionMatrixHeatmap({ title, classes, matrix, caption }) {
+  const maxValue = Math.max(...matrix.flat());
+
+  return (
+    <article className={`matrix-card matrix-${classes.length}`}>
+      <div className="matrix-card-head">
+        <div>
+          <p className="eyebrow">{title}</p>
+          <h3>Heatmap evaluasi</h3>
+        </div>
+        <span>Baris = True Label, Kolom = Predicted Label</span>
+      </div>
+      <div
+        className="matrix-grid"
+        style={{ '--matrix-count': classes.length }}
+        aria-label={title}
+      >
+        <span className="matrix-axis">
+          <em>True</em>
+          <strong>Predicted</strong>
+        </span>
+        {classes.map((label) => (
+          <span className="matrix-label predicted" key={`pred-${label}`}>
+            {formatMatrixLabel(label)}
+          </span>
+        ))}
+        {classes.map((rowLabel, rowIndex) => (
+          <Fragment key={rowLabel}>
+            <span className="matrix-label true">{formatMatrixLabel(rowLabel)}</span>
+            {matrix[rowIndex].map((value, columnIndex) => {
+              const intensity = maxValue ? value / maxValue : 0;
+              const diagonal = rowIndex === columnIndex;
+              return (
+                <span
+                  className={`matrix-cell ${diagonal ? 'diagonal' : ''}`}
+                  key={`${rowLabel}-${classes[columnIndex]}`}
+                  style={{
+                    '--intensity': intensity,
+                    '--heat-alpha': 0.08 + intensity * 0.34,
+                    '--cream-alpha': 0.12 + intensity * 0.63,
+                  }}
+                  title={`True: ${formatMatrixLabel(rowLabel)}, Predicted: ${formatMatrixLabel(classes[columnIndex])}, Count: ${value}`}
+                >
+                  {value}
+                </span>
+              );
+            })}
+          </Fragment>
+        ))}
+      </div>
+      <p className="matrix-caption">{caption}</p>
+    </article>
+  );
+}
+
+function formatMatrixLabel(label) {
+  const labels = {
+    not_chicken_feces: 'Bukan feses',
+    chicken_feces: 'Feses ayam',
+    cocci: 'Cocci',
+    healthy: 'Sehat',
+    ncd: 'NCD',
+    salmo: 'Salmo',
+  };
+  return labels[label] || label;
 }
 
 function AboutSection({ onStart }) {
   return (
     <section className="about-section">
       <div className="closing-card glass-panel">
-        <p className="eyebrow">Tentang ChickPoo</p>
-        <h2>Alat screening awal untuk peternak kecil.</h2>
-        <p>
-          ChickPoo membantu membaca tanda awal dari foto feses, menyajikan tingkat keyakinan, dan
-          memberi rekomendasi awal. Untuk keputusan pengobatan, tetap konsultasikan dengan petugas
-          kesehatan hewan.
-        </p>
-        <button className="primary-action" type="button" onClick={onStart}>
-          <span>Mulai Scan</span>
-          <ArrowRight size={18} />
-        </button>
+        <div className="closing-copy">
+          <p className="eyebrow">Tentang ChickPoo</p>
+          <h2>Screening awal yang praktis, hangat, dan tetap bertanggung jawab.</h2>
+          <p>
+            ChickPoo membantu membaca tanda awal dari foto feses, menyajikan tingkat keyakinan,
+            dan memberi rekomendasi awal yang mudah dipahami. Untuk keputusan pengobatan, tetap
+            konsultasikan dengan petugas kesehatan hewan.
+          </p>
+          <button className="primary-action" type="button" onClick={onStart}>
+            <span>Mulai Scan</span>
+            <ArrowRight size={18} />
+          </button>
+        </div>
+        <div className="closing-diagnostics" aria-label="Ringkasan nilai ChickPoo">
+          <article>
+            <span>01</span>
+            <strong>Validasi foto</strong>
+            <p>Gambar dicek lebih dulu sebelum kondisi dibaca.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <strong>Prediksi awal</strong>
+            <p>Hasil ditampilkan dengan tingkat keyakinan yang transparan.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <strong>Rekomendasi</strong>
+            <p>Arahan awal dibuat ringkas untuk membantu tindakan berikutnya.</p>
+          </article>
+        </div>
       </div>
     </section>
   );

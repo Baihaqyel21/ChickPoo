@@ -5,10 +5,12 @@ from .model_service import (
     CLASS_NAMES,
     DISEASE_MODEL_PATH,
     OBJECT_MODEL_PATH,
+    get_disease_metadata,
     get_disease_model,
     get_object_metadata,
     get_object_model,
     get_object_threshold,
+    get_training_summary,
     predict_image,
 )
 from .recommendations import CLASS_LABELS
@@ -41,8 +43,12 @@ def health():
         "object_model_path": str(OBJECT_MODEL_PATH),
         "object_threshold": get_object_threshold(),
         "object_model_name": get_object_metadata().get("best_model_name"),
+        "object_test_metrics": get_object_metadata().get("test_metrics", {}),
         "disease_model_exists": DISEASE_MODEL_PATH.exists(),
         "disease_model_path": str(DISEASE_MODEL_PATH),
+        "disease_model_name": get_disease_metadata().get("best_model_name"),
+        "disease_test_metrics": get_disease_metadata().get("test_metrics", {}),
+        "training_summary": get_training_summary(),
         "classes": [{"key": key, "label": CLASS_LABELS[key]} for key in CLASS_NAMES],
     }
 

@@ -3,8 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/png" href="/assets/poop.png" />
-    <link rel="apple-touch-icon" href="/assets/poop.png" />
+    <link rel="icon" type="image/png" href="/assets/chickpoo-favicon.png" />
+    <link rel="apple-touch-icon" href="/assets/chickpoo-favicon.png" />
+    <script>
+      (() => {
+        try {
+          const savedTheme = localStorage.getItem('theme');
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <title>ChickPoo</title>
   </head>
   <body>

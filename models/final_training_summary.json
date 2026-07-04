@@ -1,0 +1,33 @@
+{
+  "object_validation": {
+    "best_model": "object_trial_4_efficientnetb0_du128_do03_lr0.001_augmedium",
+    "best_model_path": "/kaggle/working/chickpoo_final_outputs/models/best_models/best_object_validation_model.keras",
+    "threshold": 0.41999999999999993,
+    "test_metrics": {
+      "split": "test",
+      "threshold": 0.41999999999999993,
+      "accuracy": 0.9957582184517497,
+      "auc": 0.9999422428788867,
+      "precision": 0.9960861056751468,
+      "recall": 0.9960861056751468,
+      "f1": 0.9960861056751468
+    }
+  },
+  "disease_classification": {
+    "best_model": "disease_trial_5_efficientnetb0_du256_do04_lr0.0003_augmedium",
+    "best_model_path": "/kaggle/working/chickpoo_final_outputs/models/best_models/best_disease_classifier_model.keras",
+    "test_metrics": {
+      "split": "test",
+      "accuracy": 0.9784735812133072,
+      "macro_precision": 0.9755470138636261,
+      "macro_recall": 0.9720895293376542,
+      "macro_f1": 0.9737964507529888,
+      "weighted_f1": 0.9784476699514488
+    }
+  },
+  "dataset_paths": {
+    "chickpoo_dataset_dir": "/kaggle/input/datasets/baihaqyel/chicpoodataset",
+    "non_feces_dataset_dir": "/kaggle/input/datasets/baihaqyel/bukanfeses"
+  },
+  "created_at": "2026-07-04T18:26:53.339849"
+}

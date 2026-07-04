@@ -12,40 +12,77 @@ from PIL import Image, ImageOps
 from .recommendations import CLASS_LABELS, build_invalid_input_recommendation, build_recommendation
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DISEASE_MODEL_PATH = PROJECT_ROOT / "models" / "best_model.keras"
-OBJECT_MODEL_PATH = PROJECT_ROOT / "models" / "object_validation_model.keras"
-OBJECT_METADATA_PATH = PROJECT_ROOT / "models" / "object_validation_metadata.json"
+MODELS_DIR = PROJECT_ROOT / "models"
+
+DISEASE_MODEL_PATH = MODELS_DIR / "best_disease_classifier_model.keras"
+OBJECT_MODEL_PATH = MODELS_DIR / "best_object_validation_model.keras"
+OBJECT_METADATA_PATH = MODELS_DIR / "object_validation_metadata.json"
+DISEASE_METADATA_PATH = MODELS_DIR / "disease_classifier_metadata.json"
+TRAINING_SUMMARY_PATH = MODELS_DIR / "final_training_summary.json"
 
 CLASS_NAMES = ["cocci", "healthy", "ncd", "salmo"]
 OBJECT_CLASS_NAMES = ["not_chicken_feces", "chicken_feces"]
 IMAGE_SIZE = 224
 LOW_CONFIDENCE_THRESHOLD = 0.60
 MEDIUM_CONFIDENCE_THRESHOLD = 0.80
-DEFAULT_OBJECT_THRESHOLD = 0.69
-FECES_LIKE_VISUAL_THRESHOLD = 0.35
+DEFAULT_OBJECT_THRESHOLD = 0.42
 
 _disease_model = None
 _object_model = None
 _object_metadata = None
+_disease_metadata = None
+_training_summary = None
+
+
+def _read_json(path: Path, fallback: dict) -> dict:
+    if not path.exists():
+        return fallback
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)
 
 
 def get_object_metadata() -> dict:
     global _object_metadata
     if _object_metadata is None:
-        if OBJECT_METADATA_PATH.exists():
-            with OBJECT_METADATA_PATH.open("r", encoding="utf-8") as file:
-                _object_metadata = json.load(file)
-        else:
-            _object_metadata = {
-                "best_threshold": DEFAULT_OBJECT_THRESHOLD,
+        _object_metadata = _read_json(
+            OBJECT_METADATA_PATH,
+            {
+                "task": "object_validation",
                 "class_names": OBJECT_CLASS_NAMES,
-                "decision_rule": "Accept as chicken_feces if predicted probability >= threshold",
-            }
+                "positive_class": "chicken_feces",
+                "img_size": IMAGE_SIZE,
+                "threshold": DEFAULT_OBJECT_THRESHOLD,
+                "best_model_name": "best_object_validation_model",
+            },
+        )
     return _object_metadata
 
 
+def get_disease_metadata() -> dict:
+    global _disease_metadata
+    if _disease_metadata is None:
+        _disease_metadata = _read_json(
+            DISEASE_METADATA_PATH,
+            {
+                "task": "disease_classification",
+                "class_names": CLASS_NAMES,
+                "img_size": IMAGE_SIZE,
+                "best_model_name": "best_disease_classifier_model",
+            },
+        )
+    return _disease_metadata
+
+
+def get_training_summary() -> dict:
+    global _training_summary
+    if _training_summary is None:
+        _training_summary = _read_json(TRAINING_SUMMARY_PATH, {})
+    return _training_summary
+
+
 def get_object_threshold() -> float:
-    return float(get_object_metadata().get("best_threshold", DEFAULT_OBJECT_THRESHOLD))
+    metadata = get_object_metadata()
+    return float(metadata.get("threshold", metadata.get("best_threshold", DEFAULT_OBJECT_THRESHOLD)))
 
 
 def get_disease_model():
@@ -71,9 +108,14 @@ def load_image(file_bytes: bytes) -> Image.Image:
 
 
 def prepare_image(image: Image.Image) -> np.ndarray:
-    resized = image.resize((IMAGE_SIZE, IMAGE_SIZE), Image.Resampling.LANCZOS)
+    resized = image.resize((IMAGE_SIZE, IMAGE_SIZE), Image.Resampling.BILINEAR)
     array = np.asarray(resized, dtype=np.float32)
     return np.expand_dims(array, axis=0)
+
+
+def _sigmoid_probability(prediction: np.ndarray) -> float:
+    value = float(np.asarray(prediction, dtype=np.float64).reshape(-1)[0])
+    return float(np.clip(value, 0.0, 1.0))
 
 
 def _rgb_to_hsv(array: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -95,78 +137,84 @@ def _rgb_to_hsv(array: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     hue[blue_mask] = ((red[blue_mask] - green[blue_mask]) / delta[blue_mask]) + 4
     hue *= 60
 
-    saturation = np.where(max_channel == 0, 0, delta / max_channel)
+    saturation = np.divide(delta, max_channel, out=np.zeros_like(delta), where=max_channel != 0)
     value = max_channel
     return hue, saturation, value
 
 
-def assess_feces_like_visuals(image: Image.Image) -> dict:
-    resized = image.resize((IMAGE_SIZE, IMAGE_SIZE), Image.Resampling.LANCZOS)
+def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
+    resized = image.resize((IMAGE_SIZE, IMAGE_SIZE), Image.Resampling.BILINEAR)
     array = np.asarray(resized, dtype=np.float32)
     hue, saturation, value = _rgb_to_hsv(array)
 
-    green = (hue >= 55) & (hue <= 165) & (saturation > 0.20) & (value > 0.18)
-    white_urate = (saturation < 0.25) & (value > 0.58)
-    gray_texture = (saturation < 0.30) & (value > 0.25) & (value <= 0.75)
-    brown_texture = (((hue <= 55) | (hue >= 330)) & (saturation > 0.18) & (value > 0.12) & (value < 0.70))
-    dark_texture = value < 0.32
+    green = (hue >= 45) & (hue <= 170) & (saturation > 0.18) & (value > 0.15)
+    white_urate = (saturation < 0.32) & (value > 0.52)
+    gray_texture = (saturation < 0.34) & (value > 0.20) & (value <= 0.78)
+    brown_texture = (((hue <= 58) | (hue >= 330)) & (saturation > 0.16) & (value > 0.10) & (value < 0.74))
+    dark_texture = value < 0.30
+    feces_like = (white_urate | gray_texture | brown_texture | dark_texture) & (~green)
 
     center = np.zeros_like(value, dtype=bool)
-    center[45:179, 45:179] = True
+    center[36:188, 36:188] = True
     center_size = float(center.sum())
-    center_non_green = float(((~green) & center).sum() / center_size)
-    center_textured = float(((brown_texture | dark_texture | gray_texture) & center).sum() / center_size)
-    center_urate = float((white_urate & center).sum() / center_size)
+
+    grayscale = (0.299 * array[..., 0] + 0.587 * array[..., 1] + 0.114 * array[..., 2]) / 255.0
+    gradient_y = np.abs(np.diff(grayscale, axis=0, append=grayscale[-1:, :]))
+    gradient_x = np.abs(np.diff(grayscale, axis=1, append=grayscale[:, -1:]))
+    textured_edges = (gradient_x + gradient_y) > 0.055
 
     green_ratio = float(green.mean())
-    urate_ratio = float(white_urate.mean())
-    textured_ratio = float((brown_texture | gray_texture | dark_texture).mean())
-    looks_like_outdoor_feces = (
-        green_ratio >= 0.18
-        and center_non_green >= 0.35
-        and center_textured >= 0.20
-        and (urate_ratio >= 0.08 or center_urate >= 0.12)
-    )
+    center_non_green = float(((~green) & center).sum() / center_size)
+    center_feces_like = float((feces_like & center).sum() / center_size)
+    center_white_urate = float((white_urate & center).sum() / center_size)
+    center_brown_gray_dark = float(((brown_texture | gray_texture | dark_texture) & center).sum() / center_size)
+    center_edge_ratio = float((textured_edges & center).sum() / center_size)
 
-    score = min(
+    urate_or_dense_texture = center_white_urate >= 0.22 or (
+        center_brown_gray_dark >= 0.70 and center_edge_ratio >= 0.60
+    )
+    looks_like_outdoor_feces = (
+        green_ratio >= 0.30
+        and center_non_green >= 0.52
+        and center_feces_like >= 0.52
+        and center_edge_ratio >= 0.38
+        and urate_or_dense_texture
+    )
+    support_score = min(
         1.0,
-        (green_ratio / 0.42) * 0.22
-        + (center_non_green / 0.70) * 0.28
-        + (center_textured / 0.72) * 0.30
-        + (max(urate_ratio, center_urate) / 0.34) * 0.20,
+        (green_ratio / 0.62) * 0.18
+        + (center_non_green / 0.64) * 0.24
+        + (center_feces_like / 0.64) * 0.24
+        + (center_edge_ratio / 0.62) * 0.18
+        + (max(center_white_urate / 0.35, center_brown_gray_dark / 0.78)) * 0.16,
     )
 
     return {
         "looks_like_outdoor_feces": bool(looks_like_outdoor_feces),
-        "support_score": round(score * 100, 2),
+        "support_score": round(support_score * 100, 2),
         "green_ratio": round(green_ratio * 100, 2),
-        "urate_ratio": round(urate_ratio * 100, 2),
-        "textured_ratio": round(textured_ratio * 100, 2),
         "center_non_green_ratio": round(center_non_green * 100, 2),
-        "center_texture_ratio": round(center_textured * 100, 2),
-        "center_urate_ratio": round(center_urate * 100, 2),
+        "center_feces_like_ratio": round(center_feces_like * 100, 2),
+        "center_white_urate_ratio": round(center_white_urate * 100, 2),
+        "center_brown_gray_dark_ratio": round(center_brown_gray_dark * 100, 2),
+        "center_edge_ratio": round(center_edge_ratio * 100, 2),
     }
 
 
 def run_object_validation(batch: np.ndarray, image: Image.Image) -> dict:
     threshold = get_object_threshold()
-    probability = float(get_object_model().predict(batch, verbose=0).reshape(-1)[0])
-    visual_support = assess_feces_like_visuals(image)
+    probability = _sigmoid_probability(get_object_model().predict(batch, verbose=0))
+    visual_support = assess_outdoor_feces_visuals(image)
     model_accepts = probability >= threshold
-    visual_accepts = probability >= FECES_LIKE_VISUAL_THRESHOLD or visual_support["looks_like_outdoor_feces"]
+    visual_accepts = visual_support["looks_like_outdoor_feces"]
     is_chicken_feces = model_accepts or visual_accepts
-    if model_accepts:
-        status = "accepted"
-        decision_source = "object_model"
-    elif visual_accepts:
-        status = "likely_feces"
-        decision_source = "visual_support"
-    else:
-        status = "rejected"
-        decision_source = "object_model"
+    status = "accepted" if is_chicken_feces else "rejected"
+    decision_source = "object_validation_model" if model_accepts else (
+        "outdoor_feces_visual_support" if visual_accepts else "object_validation_model"
+    )
 
     return {
-        "model": get_object_metadata().get("best_model_name", "efficientnetb0_finetuned"),
+        "model": get_object_metadata().get("best_model_name", "best_object_validation_model"),
         "status": status,
         "decision_source": decision_source,
         "is_chicken_feces": bool(is_chicken_feces),
@@ -205,6 +253,20 @@ def build_probability_rows(probabilities: np.ndarray) -> list[dict]:
     return rows
 
 
+def _model_info() -> dict:
+    return {
+        "object_validation": {
+            "name": get_object_metadata().get("best_model_name"),
+            "threshold": get_object_threshold(),
+            "test_metrics": get_object_metadata().get("test_metrics", {}),
+        },
+        "disease_classification": {
+            "name": get_disease_metadata().get("best_model_name"),
+            "test_metrics": get_disease_metadata().get("test_metrics", {}),
+        },
+    }
+
+
 def predict_image(file_bytes: bytes) -> dict:
     image = load_image(file_bytes)
     batch = prepare_image(image)
@@ -213,7 +275,7 @@ def predict_image(file_bytes: bytes) -> dict:
     if not object_validation["is_chicken_feces"]:
         return {
             "status": "invalid_input",
-            "status_message": "Foto belum cukup sesuai untuk dibaca. Ambil ulang dengan kotoran ayam sebagai objek utama.",
+            "status_message": "Foto belum terdeteksi sebagai feses ayam. Ambil ulang dengan objek kotoran ayam yang lebih jelas dan dekat.",
             "predicted_class": "unknown",
             "predicted_label": "Foto belum sesuai",
             "confidence": 0.0,
@@ -240,6 +302,7 @@ def predict_image(file_bytes: bytes) -> dict:
                 "low_confidence": LOW_CONFIDENCE_THRESHOLD,
                 "high_confidence": MEDIUM_CONFIDENCE_THRESHOLD,
             },
+            "model_info": _model_info(),
         }
 
     disease_probabilities = get_disease_model().predict(batch, verbose=0)[0]
@@ -248,8 +311,7 @@ def predict_image(file_bytes: bytes) -> dict:
     label = CLASS_NAMES[best_index]
     confidence = float(disease_probabilities[best_index])
     probability_rows = build_probability_rows(disease_probabilities)
-
-    likely_feces = object_validation["status"] == "likely_feces"
+    visual_override = object_validation["decision_source"] == "outdoor_feces_visual_support"
 
     if confidence < LOW_CONFIDENCE_THRESHOLD:
         status = "needs_retake"
@@ -257,9 +319,9 @@ def predict_image(file_bytes: bytes) -> dict:
     elif confidence < MEDIUM_CONFIDENCE_THRESHOLD:
         status = "review"
         status_message = "Hasil dapat dibaca sebagai indikasi awal dan tetap perlu diamati."
-    elif likely_feces:
+    elif visual_override:
         status = "review"
-        status_message = "Foto terindikasi sesuai untuk dianalisis. Baca hasil sebagai indikasi awal dan tetap amati kondisi ayam."
+        status_message = "Foto terindikasi sebagai feses ayam dari pola visual outdoor. Baca hasil sebagai indikasi awal dan tetap amati kondisi ayam."
     else:
         status = "accepted"
         status_message = "Hasil terbaca jelas dan memiliki tingkat keyakinan yang baik."
@@ -275,7 +337,15 @@ def predict_image(file_bytes: bytes) -> dict:
         "object_validation": object_validation,
         "input_assessment": {
             "is_plausible_feces": True,
-            "flags": [],
+            "flags": [
+                {
+                    "code": "outdoor_visual_support",
+                    "severity": "info",
+                    "message": "Foto lolos karena pola visual feses outdoor terdeteksi kuat.",
+                }
+            ]
+            if visual_override
+            else [],
         },
         "recommendation": build_recommendation(label, confidence),
         "thresholds": {
@@ -283,4 +353,5 @@ def predict_image(file_bytes: bytes) -> dict:
             "low_confidence": LOW_CONFIDENCE_THRESHOLD,
             "high_confidence": MEDIUM_CONFIDENCE_THRESHOLD,
         },
+        "model_info": _model_info(),
     }

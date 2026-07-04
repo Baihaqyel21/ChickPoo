@@ -1,0 +1,21 @@
+{
+  "task": "disease_classification",
+  "class_names": [
+    "cocci",
+    "healthy",
+    "ncd",
+    "salmo"
+  ],
+  "img_size": 224,
+  "best_model_name": "disease_trial_5_efficientnetb0_du256_do04_lr0.0003_augmedium",
+  "best_model_path": "/kaggle/working/chickpoo_final_outputs/models/best_models/best_disease_classifier_model.keras",
+  "test_metrics": {
+    "split": "test",
+    "accuracy": 0.9784735812133072,
+    "macro_precision": 0.9755470138636261,
+    "macro_recall": 0.9720895293376542,
+    "macro_f1": 0.9737964507529888,
+    "weighted_f1": 0.9784476699514488
+  },
+  "created_at": "2026-07-04T18:26:20.247149"
+}
