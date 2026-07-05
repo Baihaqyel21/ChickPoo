@@ -2738,20 +2738,20 @@ video {
   }
 
   .score-ring {
-    width: 112px;
-    height: 112px;
+    width: 126px;
+    height: 126px;
     box-shadow:
       0 18px 38px rgba(7, 9, 6, 0.3),
       inset 0 0 0 1px rgba(233, 200, 145, 0.18);
   }
 
   .score-ring::before {
-    inset: 15px;
+    inset: 18px;
   }
 
   .score-ring span {
-    max-width: 74px;
-    font-size: clamp(1.28rem, 7vw, 1.52rem);
+    max-width: 86px;
+    font-size: clamp(1.12rem, 5.8vw, 1.36rem);
   }
 
   .result-hero h2 {
