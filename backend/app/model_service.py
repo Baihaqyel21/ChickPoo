@@ -114,6 +114,36 @@ def prepare_image(image: Image.Image) -> np.ndarray:
     return np.expand_dims(array, axis=0)
 
 
+def build_validation_views(image: Image.Image) -> list[dict]:
+    width, height = image.size
+    boxes = [
+        ("full", (0.0, 0.0, 1.0, 1.0)),
+        ("trimmed", (0.06, 0.06, 0.94, 0.94)),
+        ("left_focus", (0.0, 0.06, 0.82, 0.94)),
+        ("right_focus", (0.18, 0.06, 1.0, 0.94)),
+        ("upper_focus", (0.06, 0.0, 0.94, 0.82)),
+        ("lower_focus", (0.06, 0.18, 0.94, 1.0)),
+        ("center_focus", (0.14, 0.14, 0.86, 0.86)),
+    ]
+
+    views = []
+    seen_boxes = set()
+    for label, relative_box in boxes:
+        left = int(round(relative_box[0] * width))
+        top = int(round(relative_box[1] * height))
+        right = int(round(relative_box[2] * width))
+        bottom = int(round(relative_box[3] * height))
+        if right - left < 48 or bottom - top < 48:
+            continue
+        pixel_box = (left, top, right, bottom)
+        if pixel_box in seen_boxes:
+            continue
+        seen_boxes.add(pixel_box)
+        view_image = image if label == "full" else image.crop(pixel_box)
+        views.append({"label": label, "image": view_image})
+    return views
+
+
 def build_image_info(file_bytes: bytes, image: Image.Image) -> dict:
     digest = hashlib.sha256(file_bytes).hexdigest()
     return {
@@ -284,16 +314,66 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
     }
 
 
+def assess_validation_views(image: Image.Image) -> tuple[dict, list[dict]]:
+    candidates = []
+    for view in build_validation_views(image):
+        assessment = assess_outdoor_feces_visuals(view["image"])
+        assessment["view"] = view["label"]
+        candidates.append(assessment)
+
+    candidates.sort(
+        key=lambda item: (
+            item["looks_like_outdoor_feces"],
+            item["support_score"],
+            item["center_edge_ratio"],
+        ),
+        reverse=True,
+    )
+    best = candidates[0] if candidates else assess_outdoor_feces_visuals(image)
+    summaries = [
+        {
+            "view": item["view"],
+            "looks_like_outdoor_feces": item["looks_like_outdoor_feces"],
+            "support_reason": item["support_reason"],
+            "support_score": item["support_score"],
+        }
+        for item in candidates[:4]
+    ]
+    return best, summaries
+
+
 def run_object_validation(batch: np.ndarray, image: Image.Image) -> dict:
     threshold = get_object_threshold()
-    probability = _sigmoid_probability(get_object_model().predict(batch, verbose=0))
-    visual_support = assess_outdoor_feces_visuals(image)
-    model_accepts = probability >= threshold
+    validation_views = build_validation_views(image)
+    if validation_views:
+        validation_batch = np.concatenate([prepare_image(view["image"]) for view in validation_views], axis=0)
+        view_predictions = get_object_model().predict(validation_batch, verbose=0)
+        view_probabilities = [_sigmoid_probability(prediction) for prediction in view_predictions]
+    else:
+        view_probabilities = []
+    probability = view_probabilities[0] if view_probabilities else _sigmoid_probability(get_object_model().predict(batch, verbose=0))
+    max_probability = max(view_probabilities) if view_probabilities else probability
+    max_probability_index = int(np.argmax(view_probabilities)) if view_probabilities else 0
+    max_probability_view = validation_views[max_probability_index]["label"] if validation_views else "full"
+    visual_support, visual_candidates = assess_validation_views(image)
+    full_visual_support = assess_outdoor_feces_visuals(image)
+
+    model_accepts = probability >= threshold or max_probability >= max(threshold, 0.62)
+    indoor_scene_guard = (
+        full_visual_support["indoor_ceiling_like"]
+        and probability < threshold * 0.12
+        and max_probability < 0.72
+        and not full_visual_support["looks_like_outdoor_feces"]
+    )
     visual_accepts = visual_support["looks_like_outdoor_feces"]
+    if indoor_scene_guard and visual_support.get("view") != "full":
+        visual_accepts = False
     is_chicken_feces = model_accepts or visual_accepts
     status = "accepted" if is_chicken_feces else "rejected"
-    decision_source = "object_validation_model" if model_accepts else (
+    decision_source = "object_validation_model" if probability >= threshold else (
+        f"object_validation_model_{max_probability_view}" if model_accepts else (
         visual_support.get("support_reason", "visual_support") if visual_accepts else "object_validation_model"
+        )
     )
 
     return {
@@ -301,22 +381,26 @@ def run_object_validation(batch: np.ndarray, image: Image.Image) -> dict:
         "status": status,
         "decision_source": decision_source,
         "is_chicken_feces": bool(is_chicken_feces),
-        "probability_chicken_feces": probability,
-        "percentage_chicken_feces": round(probability * 100, 2),
+        "probability_chicken_feces": max_probability,
+        "percentage_chicken_feces": round(max_probability * 100, 2),
+        "original_probability_chicken_feces": probability,
+        "original_percentage_chicken_feces": round(probability * 100, 2),
+        "max_probability_view": max_probability_view,
         "threshold": threshold,
         "visual_support": visual_support,
+        "visual_candidates": visual_candidates,
         "classes": [
             {
                 "key": "not_chicken_feces",
                 "label": "Bukan feses ayam",
-                "probability": 1.0 - probability,
-                "percentage": round((1.0 - probability) * 100, 2),
+                "probability": 1.0 - max_probability,
+                "percentage": round((1.0 - max_probability) * 100, 2),
             },
             {
                 "key": "chicken_feces",
                 "label": "Feses ayam",
-                "probability": probability,
-                "percentage": round(probability * 100, 2),
+                "probability": max_probability,
+                "percentage": round(max_probability * 100, 2),
             },
         ],
     }
