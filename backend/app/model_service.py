@@ -173,6 +173,13 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
     center_red_wet = float((red_wet_texture & center).sum() / center_size)
     center_cyan_cast = float((cyan_cast_texture & center).sum() / center_size)
     center_edge_ratio = float((textured_edges & center).sum() / center_size)
+    center_top = np.zeros_like(value, dtype=bool)
+    center_top[36:88, 36:188] = True
+    center_bottom = np.zeros_like(value, dtype=bool)
+    center_bottom[136:188, 36:188] = True
+    center_top_white_urate = float((white_urate & center_top).sum() / float(center_top.sum()))
+    center_bottom_white_urate = float((white_urate & center_bottom).sum() / float(center_bottom.sum()))
+    indoor_ceiling_like = center_top_white_urate >= 0.86 and center_bottom_white_urate <= 0.48
 
     urate_or_dense_texture = center_white_urate >= 0.22 or (
         center_brown_gray_dark >= 0.70 and center_edge_ratio >= 0.60
@@ -190,6 +197,7 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
         and center_brown_gray_dark >= 0.55
         and center_feces_like >= 0.80
         and center_edge_ratio >= 0.28
+        and not indoor_ceiling_like
     )
     dry_surface_mixed_feces = (
         green_ratio <= 0.20
@@ -251,6 +259,7 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
         "dry_surface_mixed_feces": bool(dry_surface_mixed_feces),
         "red_wet_feces": bool(red_wet_feces),
         "cyan_cast_feces": bool(cyan_cast_feces),
+        "indoor_ceiling_like": bool(indoor_ceiling_like),
         "green_ratio": round(green_ratio * 100, 2),
         "center_non_green_ratio": round(center_non_green * 100, 2),
         "center_feces_like_ratio": round(center_feces_like * 100, 2),
@@ -258,6 +267,8 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
         "center_brown_gray_dark_ratio": round(center_brown_gray_dark * 100, 2),
         "center_red_wet_ratio": round(center_red_wet * 100, 2),
         "center_cyan_cast_ratio": round(center_cyan_cast * 100, 2),
+        "center_top_white_urate_ratio": round(center_top_white_urate * 100, 2),
+        "center_bottom_white_urate_ratio": round(center_bottom_white_urate * 100, 2),
         "center_edge_ratio": round(center_edge_ratio * 100, 2),
     }
 
