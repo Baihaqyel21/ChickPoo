@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -111,6 +112,16 @@ def prepare_image(image: Image.Image) -> np.ndarray:
     resized = image.resize((IMAGE_SIZE, IMAGE_SIZE), Image.Resampling.BILINEAR)
     array = np.asarray(resized, dtype=np.float32)
     return np.expand_dims(array, axis=0)
+
+
+def build_image_info(file_bytes: bytes, image: Image.Image) -> dict:
+    digest = hashlib.sha256(file_bytes).hexdigest()
+    return {
+        "sha256": digest[:16],
+        "width": image.width,
+        "height": image.height,
+        "bytes": len(file_bytes),
+    }
 
 
 def _sigmoid_probability(prediction: np.ndarray) -> float:
@@ -341,6 +352,7 @@ def _model_info() -> dict:
 
 def predict_image(file_bytes: bytes) -> dict:
     image = load_image(file_bytes)
+    image_info = build_image_info(file_bytes, image)
     batch = prepare_image(image)
     object_validation = run_object_validation(batch, image)
 
@@ -353,6 +365,7 @@ def predict_image(file_bytes: bytes) -> dict:
             "confidence": 0.0,
             "confidence_percentage": 0.0,
             "probabilities": [],
+            "image_info": image_info,
             "object_validation": object_validation,
             "input_assessment": {
                 "is_plausible_feces": False,
@@ -406,6 +419,7 @@ def predict_image(file_bytes: bytes) -> dict:
         "confidence": confidence,
         "confidence_percentage": round(confidence * 100, 2),
         "probabilities": probability_rows,
+        "image_info": image_info,
         "object_validation": object_validation,
         "input_assessment": {
             "is_plausible_feces": True,

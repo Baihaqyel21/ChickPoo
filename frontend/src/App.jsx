@@ -98,6 +98,66 @@ function formatPercent(value, maximumFractionDigits = 1) {
   return `${rounded}%`;
 }
 
+function canvasToBlob(canvas, type = 'image/jpeg', quality = 0.94) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Gambar belum bisa diproses.'));
+    }, type, quality);
+  });
+}
+
+function decodeImageFile(file) {
+  if (typeof window !== 'undefined' && 'createImageBitmap' in window) {
+    return createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => null);
+  }
+  return Promise.resolve(null);
+}
+
+function decodeImageWithElement(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Gambar tidak bisa dibaca di browser.'));
+    };
+    image.src = url;
+  });
+}
+
+async function normalizeImageFile(file) {
+  if (!file?.type?.startsWith('image/')) return file;
+
+  const maxSide = 1600;
+  const decoded = (await decodeImageFile(file)) || (await decodeImageWithElement(file));
+  const width = decoded.width || 1;
+  const height = decoded.height || 1;
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+
+  const context = canvas.getContext('2d');
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.fillStyle = '#f8eed3';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(decoded, 0, 0, canvas.width, canvas.height);
+  if ('close' in decoded) decoded.close();
+
+  const normalizedBlob = await canvasToBlob(canvas);
+  const baseName = file.name?.replace(/\.[^.]+$/, '') || `chickpoo-image-${Date.now()}`;
+  return new File([normalizedBlob], `${baseName}-normalized.jpg`, {
+    type: 'image/jpeg',
+    lastModified: file.lastModified || Date.now(),
+  });
+}
+
 function formatWholePercent(value) {
   return `${Math.round(Number(value || 0))}%`;
 }
@@ -195,19 +255,22 @@ function App() {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  function updateSelectedFile(file) {
+  async function updateSelectedFile(file) {
     if (!file) return;
     setError('');
     setResult(null);
-    setSelectedFile(file);
+    const normalizedFile = await normalizeImageFile(file);
+    setSelectedFile(normalizedFile);
     setPreviewUrl((previousUrl) => {
       if (previousUrl) URL.revokeObjectURL(previousUrl);
-      return URL.createObjectURL(file);
+      return URL.createObjectURL(normalizedFile);
     });
   }
 
   function handleFileInput(event) {
-    updateSelectedFile(event.target.files?.[0]);
+    void updateSelectedFile(event.target.files?.[0]).catch(() => {
+      setError('Gambar belum bisa diproses. Coba gunakan JPG atau PNG yang lebih umum.');
+    });
     event.target.value = '';
   }
 
@@ -216,7 +279,9 @@ function App() {
     setDragActive(false);
     const file = event.dataTransfer.files?.[0];
     if (file?.type?.startsWith('image/')) {
-      updateSelectedFile(file);
+      void updateSelectedFile(file).catch(() => {
+        setError('Gambar belum bisa diproses. Coba gunakan JPG atau PNG yang lebih umum.');
+      });
     } else {
       setError('Gunakan file gambar seperti JPG, PNG, atau WEBP.');
     }
@@ -230,7 +295,7 @@ function App() {
   async function useSampleImage(item) {
     const response = await fetch(item.src);
     const blob = await response.blob();
-    updateSelectedFile(new File([blob], item.filename, { type: blob.type || 'image/jpeg' }));
+    await updateSelectedFile(new File([blob], item.filename, { type: blob.type || 'image/jpeg' }));
     scrollToSection('scanner');
   }
 
@@ -244,7 +309,6 @@ function App() {
       });
       streamRef.current = stream;
       setCameraActive(true);
-      scrollToSection('scanner');
     } catch {
       setCameraError('Kamera tidak bisa diakses. Periksa izin kamera di browser.');
     }
@@ -271,7 +335,7 @@ function App() {
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob((blob) => {
       if (!blob) return;
-      updateSelectedFile(new File([blob], `chickpoo-camera-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      void updateSelectedFile(new File([blob], `chickpoo-camera-${Date.now()}.jpg`, { type: 'image/jpeg' }));
       stopCamera();
     }, 'image/jpeg', 0.92);
   }
@@ -553,9 +617,9 @@ function ScannerSection({
             onDrop={handleDrop}
           >
             {cameraActive ? (
-              <video ref={videoRef} className="preview-media" muted playsInline />
+              <video ref={videoRef} className="preview-media camera-preview" muted playsInline />
             ) : previewUrl ? (
-              <img src={previewUrl} alt="Preview foto feses ayam" className="preview-media" />
+              <img src={previewUrl} alt="Preview foto feses ayam" className="preview-media uploaded-preview" />
             ) : (
               <div className="drop-empty">
                 <span className="drop-icon">
