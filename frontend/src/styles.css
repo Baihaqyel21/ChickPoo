@@ -2568,12 +2568,15 @@ video {
 
   .why-card,
   .model-console-head {
+    display: grid;
     grid-template-columns: 1fr;
+    align-items: start;
   }
 
   .why-card .primary-action,
   .model-console-head .primary-action {
     width: 100%;
+    justify-self: stretch;
   }
 
   .workflow-photo {

@@ -151,6 +151,8 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
     white_urate = (saturation < 0.32) & (value > 0.52)
     gray_texture = (saturation < 0.34) & (value > 0.20) & (value <= 0.78)
     brown_texture = (((hue <= 58) | (hue >= 330)) & (saturation > 0.16) & (value > 0.10) & (value < 0.74))
+    red_wet_texture = (((hue <= 18) | (hue >= 345)) & (saturation > 0.28) & (value > 0.18) & (value < 0.90))
+    cyan_cast_texture = ((hue >= 165) & (hue <= 235) & (saturation > 0.12) & (value > 0.22) & (value < 0.95))
     dark_texture = value < 0.30
     feces_like = (white_urate | gray_texture | brown_texture | dark_texture) & (~green)
 
@@ -168,18 +170,68 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
     center_feces_like = float((feces_like & center).sum() / center_size)
     center_white_urate = float((white_urate & center).sum() / center_size)
     center_brown_gray_dark = float(((brown_texture | gray_texture | dark_texture) & center).sum() / center_size)
+    center_red_wet = float((red_wet_texture & center).sum() / center_size)
+    center_cyan_cast = float((cyan_cast_texture & center).sum() / center_size)
     center_edge_ratio = float((textured_edges & center).sum() / center_size)
 
     urate_or_dense_texture = center_white_urate >= 0.22 or (
         center_brown_gray_dark >= 0.70 and center_edge_ratio >= 0.60
     )
-    looks_like_outdoor_feces = (
+    grass_surface_feces = (
         green_ratio >= 0.30
         and center_non_green >= 0.52
         and center_feces_like >= 0.52
         and center_edge_ratio >= 0.38
         and urate_or_dense_texture
     )
+    dry_surface_urate_feces = (
+        green_ratio <= 0.20
+        and center_white_urate >= 0.62
+        and center_feces_like >= 0.80
+        and center_edge_ratio >= 0.28
+    )
+    dry_surface_mixed_feces = (
+        green_ratio <= 0.20
+        and center_white_urate >= 0.22
+        and center_brown_gray_dark >= 0.84
+        and center_feces_like >= 0.76
+        and center_edge_ratio >= 0.42
+    )
+    red_wet_feces = (
+        green_ratio <= 0.30
+        and center_red_wet >= 0.28
+        and center_white_urate >= 0.16
+        and center_brown_gray_dark >= 0.72
+        and center_feces_like >= 0.76
+        and center_edge_ratio >= 0.28
+    )
+    cyan_cast_feces = (
+        green_ratio <= 0.18
+        and center_cyan_cast >= 0.30
+        and center_white_urate >= 0.28
+        and center_brown_gray_dark >= 0.66
+        and center_feces_like >= 0.82
+        and center_edge_ratio >= 0.25
+    )
+    looks_like_outdoor_feces = (
+        grass_surface_feces
+        or dry_surface_urate_feces
+        or dry_surface_mixed_feces
+        or red_wet_feces
+        or cyan_cast_feces
+    )
+    if grass_surface_feces:
+        support_reason = "visual_support_grass_surface"
+    elif dry_surface_urate_feces:
+        support_reason = "visual_support_dry_surface_urate"
+    elif dry_surface_mixed_feces:
+        support_reason = "visual_support_dry_surface_mixed"
+    elif red_wet_feces:
+        support_reason = "visual_support_red_wet_pattern"
+    elif cyan_cast_feces:
+        support_reason = "visual_support_cyan_cast_pattern"
+    else:
+        support_reason = "none"
     support_score = min(
         1.0,
         (green_ratio / 0.62) * 0.18
@@ -191,12 +243,20 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
 
     return {
         "looks_like_outdoor_feces": bool(looks_like_outdoor_feces),
+        "support_reason": support_reason,
         "support_score": round(support_score * 100, 2),
+        "grass_surface_feces": bool(grass_surface_feces),
+        "dry_surface_urate_feces": bool(dry_surface_urate_feces),
+        "dry_surface_mixed_feces": bool(dry_surface_mixed_feces),
+        "red_wet_feces": bool(red_wet_feces),
+        "cyan_cast_feces": bool(cyan_cast_feces),
         "green_ratio": round(green_ratio * 100, 2),
         "center_non_green_ratio": round(center_non_green * 100, 2),
         "center_feces_like_ratio": round(center_feces_like * 100, 2),
         "center_white_urate_ratio": round(center_white_urate * 100, 2),
         "center_brown_gray_dark_ratio": round(center_brown_gray_dark * 100, 2),
+        "center_red_wet_ratio": round(center_red_wet * 100, 2),
+        "center_cyan_cast_ratio": round(center_cyan_cast * 100, 2),
         "center_edge_ratio": round(center_edge_ratio * 100, 2),
     }
 
@@ -210,7 +270,7 @@ def run_object_validation(batch: np.ndarray, image: Image.Image) -> dict:
     is_chicken_feces = model_accepts or visual_accepts
     status = "accepted" if is_chicken_feces else "rejected"
     decision_source = "object_validation_model" if model_accepts else (
-        "outdoor_feces_visual_support" if visual_accepts else "object_validation_model"
+        visual_support.get("support_reason", "visual_support") if visual_accepts else "object_validation_model"
     )
 
     return {
@@ -311,7 +371,7 @@ def predict_image(file_bytes: bytes) -> dict:
     label = CLASS_NAMES[best_index]
     confidence = float(disease_probabilities[best_index])
     probability_rows = build_probability_rows(disease_probabilities)
-    visual_override = object_validation["decision_source"] == "outdoor_feces_visual_support"
+    visual_override = str(object_validation["decision_source"]).startswith("visual_support_")
 
     if confidence < LOW_CONFIDENCE_THRESHOLD:
         status = "needs_retake"
@@ -321,7 +381,7 @@ def predict_image(file_bytes: bytes) -> dict:
         status_message = "Hasil dapat dibaca sebagai indikasi awal dan tetap perlu diamati."
     elif visual_override:
         status = "review"
-        status_message = "Foto terindikasi sebagai feses ayam dari pola visual outdoor. Baca hasil sebagai indikasi awal dan tetap amati kondisi ayam."
+        status_message = "Foto terindikasi sebagai feses ayam dari pola visual. Baca hasil sebagai indikasi awal dan tetap amati kondisi ayam."
     else:
         status = "accepted"
         status_message = "Hasil terbaca jelas dan memiliki tingkat keyakinan yang baik."
@@ -341,7 +401,7 @@ def predict_image(file_bytes: bytes) -> dict:
                 {
                     "code": "outdoor_visual_support",
                     "severity": "info",
-                    "message": "Foto lolos karena pola visual feses outdoor terdeteksi kuat.",
+                    "message": "Foto lolos karena pola visual feses terdeteksi kuat.",
                 }
             ]
             if visual_override
