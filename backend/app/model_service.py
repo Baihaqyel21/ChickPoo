@@ -187,6 +187,7 @@ def assess_outdoor_feces_visuals(image: Image.Image) -> dict:
     dry_surface_urate_feces = (
         green_ratio <= 0.20
         and center_white_urate >= 0.62
+        and center_brown_gray_dark >= 0.55
         and center_feces_like >= 0.80
         and center_edge_ratio >= 0.28
     )
